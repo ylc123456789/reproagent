@@ -36,7 +36,7 @@ pip install -e '.[dev]'
 Runtime requirement:
 
 ```text
-conda must be available on PATH inside Ubuntu-D
+conda must be available on PATH, or set REPROAGENT_CONDA_EXE=/path/to/conda
 ```
 
 ## Run with Mock LLM

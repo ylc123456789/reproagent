@@ -39,7 +39,8 @@ def plan_experiment(state: ReproState) -> CommandPlan:
 Plan the next experiment/demo/evaluation commands to try.
 Return JSON with fields: stage, summary, commands, assumptions, stop_reason.
 Use stage='experiment'. Prefer bounded commands that can produce a metric or verify the repo runs with the configured hardware.
-For the default run, choose a short reproduction smoke/evaluation expected to finish in a few minutes, preferably a unit test, documented small demo, or tiny inline GPU workload. Avoid dataset downloads, MNIST/full training, multi-epoch training, or long examples unless there is no smaller valid reproduction step.
+For the default run, choose a short reproduction smoke/evaluation expected to finish in a few minutes. Prefer, in order: (1) a tiny inline GPU workload that imports the project and performs one minimal operation, (2) one small targeted test file, (3) one documented small demo with bounded runtime.
+Avoid aggregate test suites such as tests/run_all.py, bare pytest over the whole repo, dataset downloads, MNIST/full training, multi-epoch training, or long examples unless there is no smaller valid reproduction step.
 If full paper reproduction requires expensive training or datasets, do not start it by default; describe the required command, data, expected runtime, and assumptions in stop_reason/assumptions so the report records the next step.
 Do not use conda activate; commands already run inside the prepared conda environment.
 """
@@ -54,7 +55,7 @@ Return JSON with fields: stage, summary, commands, assumptions, stop_reason.
 If the audit says GPU repair is required, fix the installed ML framework build so GPU is available on this hardware, unless the repo clearly does not use that framework. Prefer explicit uninstall/reinstall commands for incompatible packages when needed.
 If the audit says NumPy ABI repair is required, pin or downgrade NumPy, commonly `pip install "numpy<2"`, then rerun a quick import/device check.
 For environment-stage revisions, do not run repository demos/examples/training. Validate with quick import/version/device checks only; real demos belong in the experiment stage after audit passes.
-For experiment-stage revisions, prefer shorter bounded checks after a timeout; do not escalate to dataset downloads or training jobs unless explicitly necessary.
+For experiment-stage revisions, prefer shorter bounded checks after a timeout, such as a tiny inline operation or a single targeted test file. Do not escalate to aggregate test suites, dataset downloads, or training jobs unless explicitly necessary.
 If using `python -c`, do not define a `def` function on a semicolon-separated one-liner; use a lambda or a short import/device check instead.
 Do not use conda activate; commands already run inside the prepared conda environment.
 """

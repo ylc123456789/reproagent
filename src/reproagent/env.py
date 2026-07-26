@@ -6,6 +6,7 @@ commands stay plain shell commands; this module wraps them with `conda run`.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -19,7 +20,7 @@ def ensure_environment(state: ReproState) -> EnvironmentInfo:
     assert state.repo_context is not None
     conda = find_conda()
     if conda is None:
-        raise RuntimeError("conda was not found on PATH or common install paths. Install Miniconda/Anaconda in Ubuntu-D before running reproagent.")
+        raise RuntimeError("conda was not found. Set REPROAGENT_CONDA_EXE or install Miniconda/Anaconda so conda is on PATH.")
 
     env_name = _env_name(state.task.task_id)
     logs = state.task.workspace_dir / "logs"
@@ -64,13 +65,18 @@ def build_backend_command(env_name: str, command: str, conda: str | None = None)
 
 
 def find_conda() -> str | None:
-    """Find conda in PATH or common Ubuntu-D install locations."""
+    """Find conda from explicit config, PATH, or common install locations."""
+    configured = os.environ.get("REPROAGENT_CONDA_EXE")
+    if configured:
+        candidate = Path(configured).expanduser()
+        if candidate.exists() and candidate.is_file():
+            return str(candidate)
     found = shutil.which("conda")
     if found:
         return found
     for candidate in (
         Path.home() / "miniconda3" / "bin" / "conda",
-        Path("/home/cyl/miniconda3/bin/conda"),
+        Path.home() / "anaconda3" / "bin" / "conda",
         Path("/opt/conda/bin/conda"),
     ):
         if candidate.exists() and candidate.is_file():

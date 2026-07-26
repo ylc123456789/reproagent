@@ -10,6 +10,7 @@ from .models import CommandResult
 
 BLOCKED_SNIPPETS = ["sudo", "rm -rf", "curl", "wget", "| bash", "> /", "shutdown", "reboot", "conda activate"]
 ENV_STAGE_LONG_RUNNING_HINTS = ["examples/", "train.py", "demo.py", "mnist", "epoch", "--epochs"]
+EXPERIMENT_BROAD_HINTS = ["tests/run_all.py", "run_all.py"]
 
 
 def is_safe_command(command: str, stage: str | None = None) -> tuple[bool, str | None]:
@@ -23,7 +24,18 @@ def is_safe_command(command: str, stage: str | None = None) -> tuple[bool, str |
         for hint in ENV_STAGE_LONG_RUNNING_HINTS:
             if hint in lowered:
                 return False, f"environment stage should not run experiment/demo/training command: {hint}"
+    if stage == "experiment":
+        for hint in EXPERIMENT_BROAD_HINTS:
+            if hint in lowered:
+                return False, f"experiment stage should start with a targeted small test, not broad command: {hint}"
+        if _is_bare_pytest(lowered):
+            return False, "experiment stage should target a small test file, not the whole pytest suite"
     return True, None
+
+
+def _is_bare_pytest(lowered_command: str) -> bool:
+    normalized = " ".join(lowered_command.split())
+    return normalized in {"pytest", "python -m pytest"}
 
 
 def run_commands(commands: list[str], cwd: Path, workspace: Path, stage: str, attempt: int, timeout: int, env_name: str) -> list[CommandResult]:
