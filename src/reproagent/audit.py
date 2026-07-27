@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .env import build_backend_command, find_conda
 from .models import EnvironmentAudit, ReproState
+from .runner import _command_env
 
 
 PROBE_CODE = """
@@ -59,6 +60,7 @@ def audit_environment(state: ReproState) -> EnvironmentAudit:
         text=True,
         capture_output=True,
         timeout=min(state.task.timeout_seconds, 180),
+        env=_command_env(state.task.workspace_dir),
     )
     stdout_path.write_text(result.stdout or "", encoding="utf-8", errors="replace")
     stderr_path.write_text(result.stderr or "", encoding="utf-8", errors="replace")

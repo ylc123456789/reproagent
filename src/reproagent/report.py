@@ -36,7 +36,8 @@ def write_result(state: ReproState):
         "## Inputs", "",
         f"- Paper: {state.task.paper_url}",
         f"- Repo: {state.task.repo_url}",
-        f"- Backend: {state.task.backend}", "",
+        f"- Backend: {state.task.backend}",
+        f"- Experiment profile: {state.task.experiment_profile}", "",
     ]
     if state.repo_context:
         lines += [

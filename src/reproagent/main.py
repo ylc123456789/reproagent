@@ -104,6 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-env-attempts", type=int, default=3)
     run.add_argument("--max-run-attempts", type=int, default=3)
     run.add_argument("--timeout", type=int, default=1800)
+    run.add_argument("--experiment-profile", default="smoke", choices=["smoke", "medium", "full"], help="Experiment ambition: smoke, medium, or full")
     return parser
 
 
@@ -123,6 +124,7 @@ def main(argv: list[str] | None = None) -> None:
             max_env_attempts=args.max_env_attempts,
             max_run_attempts=args.max_run_attempts,
             timeout_seconds=args.timeout,
+            experiment_profile=args.experiment_profile,
         )
         state = run_task(task)
         print(f"status: {state.status}")

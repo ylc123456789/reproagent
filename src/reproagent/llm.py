@@ -33,15 +33,24 @@ If no setup is needed, commands may be empty.
     return _complete_plan(state, prompt, stage="environment")
 
 
+def _experiment_policy(state: ReproState) -> str:
+    profile = state.task.experiment_profile
+    if profile == "smoke":
+        return """Experiment profile: smoke. Choose a short reproduction smoke/evaluation expected to finish in a few minutes. Prefer, in order: (1) a tiny inline GPU workload that imports the project and performs one minimal operation, (2) one small targeted test file, (3) one documented small demo with bounded runtime. Avoid dataset downloads, MNIST/full training, multi-epoch training, or long examples."""
+    if profile == "medium":
+        return """Experiment profile: medium. Choose one bounded repo-provided experiment that is closer to a paper result than a pure smoke test, preferably a small/short version of a central experiment. Dataset downloads are allowed if they are standard small public datasets such as MNIST. Prefer explicit GPU flags when available. Prefer command-line arguments that limit epochs/iterations/batches/runtime while still producing a metric. Do not start multi-hour full reproduction runs; if no bounded option exists, run the closest documented GPU example and describe the full command in stop_reason."""
+    return """Experiment profile: full. Choose commands intended to reproduce the paper's reported experiments as faithfully as possible. Use documented repo scripts and hyperparameters when available, use GPU when supported, and explain expected runtime/data/checkpoints in assumptions. Avoid unsafe commands, but full training/evaluation is allowed when it is required for reproduction."""
+
+
 def plan_experiment(state: ReproState) -> CommandPlan:
-    prompt = _base_context(state) + _recent_logs(state) + """
+    prompt = _base_context(state) + _recent_logs(state) + f"""
 
 Plan the next experiment/demo/evaluation commands to try.
 Return JSON with fields: stage, summary, commands, assumptions, stop_reason.
 Use stage='experiment'. Prefer bounded commands that can produce a metric or verify the repo runs with the configured hardware.
-For the default run, choose a short reproduction smoke/evaluation expected to finish in a few minutes. Prefer, in order: (1) a tiny inline GPU workload that imports the project and performs one minimal operation, (2) one small targeted test file, (3) one documented small demo with bounded runtime.
-Avoid aggregate test suites such as tests/run_all.py, bare pytest over the whole repo, dataset downloads, MNIST/full training, multi-epoch training, or long examples unless there is no smaller valid reproduction step.
-If full paper reproduction requires expensive training or datasets, do not start it by default; describe the required command, data, expected runtime, and assumptions in stop_reason/assumptions so the report records the next step.
+{_experiment_policy(state)}
+Avoid aggregate test suites such as tests/run_all.py or bare pytest over the whole repo unless the experiment profile is full and the suite is explicitly part of reproduction.
+If full paper reproduction requires expensive training or datasets and the profile is not full, do not start it by default; describe the required command, data, expected runtime, and assumptions in stop_reason/assumptions so the report records the next step.
 Do not use conda activate; commands already run inside the prepared conda environment.
 """
     return _complete_plan(state, prompt, stage="experiment")
