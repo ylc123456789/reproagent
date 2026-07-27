@@ -1,0 +1,11 @@
+name: reproagent
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - git
+  - pip:
+      - pydantic>=2.0
+      - pytest>=8.0

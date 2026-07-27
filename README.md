@@ -24,13 +24,23 @@ Sibling projects:
 
 ## Install
 
-`reproagent` itself uses a small Python venv for development, but reproduced projects run in per-task conda envs.
+`reproagent` itself can be installed in a small conda environment. Reproduced paper repositories still run in separate per-task conda environments created by `reproagent`.
 
 ```bash
-cd /home/cyl/reproagent
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -e '.[dev]'
+cd /path/to/reproagent
+conda env create -f environment.yml
+conda activate reproagent
+pip install -e .
+pytest -q
+```
+
+To update an existing environment:
+
+```bash
+cd /path/to/reproagent
+conda env update -f environment.yml --prune
+conda activate reproagent
+pip install -e .
 ```
 
 Runtime requirement:
@@ -38,6 +48,8 @@ Runtime requirement:
 ```text
 conda must be available on PATH, or set REPROAGENT_CONDA_EXE=/path/to/conda
 ```
+
+A Python venv also works for local development, but the conda setup above is the recommended path for servers.
 
 ## Run with Mock LLM
 
@@ -115,7 +127,7 @@ Not implemented yet:
 
 ```text
 Docker backend
-GPU/CUDA automatic configuration
+cloud/SSH execution backend
 paper PDF parsing
 automatic dataset/checkpoint management
 automatic SOTA discovery
