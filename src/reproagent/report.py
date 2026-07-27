@@ -3,6 +3,15 @@ from __future__ import annotations
 from .models import ReproState
 
 MOJIBAKE_REPLACEMENTS = {
+    "â€™": "’",
+    "â€˜": "‘",
+    "â€œ": "“",
+    "â€": "”",
+    "â€“": "–",
+    "â€”": "—",
+    "鈮?": ">=",
+    "鈮?.": ">=.",
+    "鈥?": "-",
     "鈥檚": "'s",
     "鈥檛": "'t",
     "鈥檙": "'r",
@@ -10,12 +19,22 @@ MOJIBAKE_REPLACEMENTS = {
     "鈥檓": "'m",
     "鈥檒": "'l",
     "鈥檇": "'d",
-    "鈥?": "-",
+    "鈥慳": "-a",
+    "鈥慛": "-N",
+    "鈥憇": "-s",
+    "鈥憆": "-r",
     "鈥": "-",
-    "憇": "s",
-    "憆": "r",
+    "檚": "'s",
+    "檛": "'t",
+    "檙": "'r",
+    "檝": "'v",
+    "檓": "'m",
+    "檒": "'l",
+    "檇": "'d",
     "慳": "a",
     "慛": "N",
+    "憇": "s",
+    "憆": "r",
 }
 
 
@@ -110,7 +129,22 @@ def _stage_lines(title: str, attempts) -> list[str]:
 
 
 def _clean_text(text: str) -> str:
-    cleaned = text
+    cleaned = _repair_latin1_mojibake(text)
     for bad, replacement in MOJIBAKE_REPLACEMENTS.items():
         cleaned = cleaned.replace(bad, replacement)
     return cleaned
+
+
+def _repair_latin1_mojibake(text: str) -> str:
+    try:
+        repaired = text.encode("latin1").decode("utf-8")
+    except UnicodeError:
+        return text
+    if _mojibake_score(repaired) < _mojibake_score(text):
+        return repaired
+    return text
+
+
+def _mojibake_score(text: str) -> int:
+    markers = ("鈥", "檚", "慳", "慛", "憇", "憆", "â", "Ã", "�")
+    return sum(text.count(marker) for marker in markers)
