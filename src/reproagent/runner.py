@@ -18,7 +18,7 @@ def is_safe_command(command: str, stage: str | None = None) -> tuple[bool, str |
     for bad in BLOCKED_SNIPPETS:
         if bad in lowered:
             return False, f"blocked unsafe snippet: {bad}"
-    if ".." in command:
+    if _has_parent_directory_traversal(command):
         return False, "blocked parent-directory traversal"
     if stage == "environment":
         for hint in ENV_STAGE_LONG_RUNNING_HINTS:
@@ -36,6 +36,12 @@ def is_safe_command(command: str, stage: str | None = None) -> tuple[bool, str |
 def _is_bare_pytest(lowered_command: str) -> bool:
     normalized = " ".join(lowered_command.split())
     return normalized in {"pytest", "python -m pytest"}
+
+
+def _has_parent_directory_traversal(command: str) -> bool:
+    normalized = command.replace("\\", "/")
+    tokens = normalized.split()
+    return any(token == ".." or token.startswith("../") or "/../" in token for token in tokens)
 
 
 def run_commands(commands: list[str], cwd: Path, workspace: Path, stage: str, attempt: int, timeout: int, env_name: str) -> list[CommandResult]:

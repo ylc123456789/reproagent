@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import shlex
 import subprocess
+from pathlib import Path
 
 from .env import build_backend_command, find_conda
 from .models import EnvironmentAudit, ReproState
@@ -42,7 +43,6 @@ except Exception as exc:
 print(json.dumps(data, indent=2, ensure_ascii=False))
 """
 
-
 def audit_environment(state: ReproState) -> EnvironmentAudit:
     """Inspect the prepared conda env and summarize important mismatches."""
     assert state.environment is not None
@@ -77,15 +77,19 @@ def audit_environment(state: ReproState) -> EnvironmentAudit:
             success = False
             summary = "Environment audit output was not valid JSON."
         if data:
-            expected_prefix = f"/envs/{state.environment.env_name}/"
             executable = str(data.get("sys_executable") or "")
+            env_prefix = _infer_env_prefix(str(data.get("sys_prefix") or ""), executable)
             pip_version = str(data.get("pip_version") or "")
             details.append(f"Python executable: {executable or 'unknown'}")
             details.append(f"Pip: {pip_version or 'unknown'}")
-            if expected_prefix not in executable:
+            env_name_matches = env_prefix.name == state.environment.env_name
+            if not env_name_matches:
+                success = False
+                details.append(f"Mismatch: sys.prefix does not match expected conda env {state.environment.env_name}: {env_prefix}")
+            if executable and (not env_name_matches or not _path_is_under(executable, env_prefix)):
                 success = False
                 details.append(f"Mismatch: python executable is not inside expected conda env {state.environment.env_name}.")
-            if expected_prefix not in pip_version:
+            if pip_version and str(env_prefix) not in pip_version:
                 details.append(f"Mismatch: pip is not inside expected conda env {state.environment.env_name}.")
             torch_info = data.get("torch")
             if isinstance(torch_info, dict):
@@ -97,7 +101,7 @@ def audit_environment(state: ReproState) -> EnvironmentAudit:
                     f"device_count={torch_info.get('device_count')}"
                 )
                 torch_file = str(torch_info.get("file") or "")
-                if torch_file and expected_prefix not in torch_file:
+                if torch_file and not _path_is_under(torch_file, env_prefix):
                     success = False
                     details.append(f"Mismatch: torch is loaded outside expected conda env {state.environment.env_name}.")
                 if gpu_visible and not torch_info.get("cuda_available"):
@@ -132,10 +136,25 @@ def audit_environment(state: ReproState) -> EnvironmentAudit:
         stderr_path=stderr_path,
     )
 
-
-
 def _gpu_visible(state: ReproState) -> bool:
     if not state.repo_context:
         return False
     hardware = state.repo_context.hardware_text.lower()
     return "gpu 0:" in hardware or ("nvidia-smi:" in hardware and "not available" not in hardware)
+
+def _infer_env_prefix(sys_prefix: str, executable: str) -> Path:
+    if sys_prefix:
+        return Path(sys_prefix)
+    executable_path = Path(executable)
+    if executable_path.parent.name == "bin":
+        return executable_path.parent.parent
+    return Path("")
+
+def _path_is_under(path: str, parent: Path) -> bool:
+    if not path or not str(parent):
+        return False
+    try:
+        Path(path).resolve().relative_to(parent.resolve())
+    except ValueError:
+        return False
+    return True

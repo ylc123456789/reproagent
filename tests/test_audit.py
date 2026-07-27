@@ -1,7 +1,6 @@
 from reproagent.audit import audit_environment
 from reproagent.models import EnvironmentInfo, RepoContext, ReproState, ReproTask
 
-
 def test_audit_detects_python_outside_expected_env(tmp_path, monkeypatch):
     task = ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path)
     state = ReproState(
@@ -31,7 +30,6 @@ def test_audit_detects_python_outside_expected_env(tmp_path, monkeypatch):
     assert any("GPU repair required" in item for item in audit.details)
     assert audit.stdout_path == tmp_path / "logs" / "environment_audit.stdout"
 
-
 def test_audit_passes_when_python_and_torch_are_inside_env(tmp_path, monkeypatch):
     env_prefix = "/home/cyl/miniconda3/envs/repro_demo"
     task = ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path)
@@ -55,7 +53,6 @@ def test_audit_passes_when_python_and_torch_are_inside_env(tmp_path, monkeypatch
     assert not audit.has_warnings
     assert not audit.requires_repair
     assert audit.summary == "Environment audit passed."
-
 
 def test_audit_requires_repair_for_numpy_abi_warning(tmp_path, monkeypatch):
     env_prefix = "/home/cyl/miniconda3/envs/repro_demo"
@@ -81,3 +78,26 @@ def test_audit_requires_repair_for_numpy_abi_warning(tmp_path, monkeypatch):
     assert audit.requires_repair
     assert audit.summary == "Environment audit requires repair."
     assert any("NumPy ABI" in item for item in audit.details)
+
+def test_audit_passes_with_custom_conda_env_dir(tmp_path, monkeypatch):
+    env_prefix = "/root/autodl-tmp/conda-envs/repro_demo"
+    task = ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path)
+    state = ReproState(
+        task=task,
+        repo_context=RepoContext(repo_path=tmp_path),
+        environment=EnvironmentInfo(env_name="repro_demo"),
+    )
+
+    class Result:
+        returncode = 0
+        stdout = '{"sys_executable":"' + env_prefix + '/bin/python","sys_prefix":"' + env_prefix + '","pip_version":"pip 1 from ' + env_prefix + '/lib/python3.10/site-packages/pip","torch":{"version":"2.6.0+cu124","file":"' + env_prefix + '/lib/python3.10/site-packages/torch/__init__.py","cuda_compiled":"12.4","cuda_available":true,"device_count":1}}'
+        stderr = ""
+
+    monkeypatch.setattr("reproagent.audit.find_conda", lambda: "/fake/conda")
+    monkeypatch.setattr("reproagent.audit.subprocess.run", lambda *args, **kwargs: Result())
+
+    audit = audit_environment(state)
+
+    assert audit.success
+    assert audit.summary == "Environment audit passed."
+    assert not any("Mismatch" in item for item in audit.details)
