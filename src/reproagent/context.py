@@ -2,31 +2,41 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from .hardware import collect_hardware_text
 from .models import RepoContext, ReproTask
 
+CLONE_ATTEMPTS = 3
+CLONE_TIMEOUT_SECONDS = 300
+
 
 def clone_repo(task: ReproTask) -> Path:
     repo_path = task.workspace_dir / "repo"
-    if repo_path.exists() and any(repo_path.iterdir()):
-        return repo_path
-    repo_path.parent.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(
-        ["git", "clone", "--depth", "1", task.repo_url, str(repo_path)],
-        text=True,
-        capture_output=True,
-        timeout=300,
-    )
     log_dir = task.workspace_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    (log_dir / "clone.stdout").write_text(result.stdout or "", encoding="utf-8")
-    (log_dir / "clone.stderr").write_text(result.stderr or "", encoding="utf-8")
-    if result.returncode != 0:
-        raise RuntimeError(f"git clone failed: {result.stderr.strip()}")
-    return repo_path
+
+    if repo_path.exists():
+        if _is_usable_repo(repo_path):
+            return repo_path
+        _remove_path(repo_path)
+
+    repo_path.parent.mkdir(parents=True, exist_ok=True)
+    latest_error = ""
+    for attempt in range(1, CLONE_ATTEMPTS + 1):
+        result = _run_clone(task.repo_url, repo_path)
+        _write_clone_logs(log_dir, result, attempt)
+        latest_error = (result.stderr or "").strip() or (result.stdout or "").strip()
+        if result.returncode == 0 and _is_usable_repo(repo_path):
+            return repo_path
+        _remove_path(repo_path)
+        if attempt < CLONE_ATTEMPTS:
+            time.sleep(min(2 * attempt, 10))
+
+    raise RuntimeError(f"git clone failed after {CLONE_ATTEMPTS} attempts: {latest_error}")
 
 
 def collect_context(task: ReproTask) -> RepoContext:
@@ -78,6 +88,59 @@ Commit: `{commit or 'unknown'}`
         paper_url=task.paper_url,
         summary_path=summary_path,
     )
+
+
+def _run_clone(repo_url: str, repo_path: Path) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            ["git", "clone", "--depth", "1", "--single-branch", repo_url, str(repo_path)],
+            text=True,
+            capture_output=True,
+            timeout=CLONE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout if isinstance(exc.stdout, str) else (exc.stdout or b"").decode("utf-8", errors="replace")
+        stderr = exc.stderr if isinstance(exc.stderr, str) else (exc.stderr or b"").decode("utf-8", errors="replace")
+        stderr = (stderr or "") + f"\nCommand timed out after {CLONE_TIMEOUT_SECONDS}s"
+        return subprocess.CompletedProcess(exc.cmd, -1, stdout, stderr)
+
+
+def _write_clone_logs(log_dir: Path, result: subprocess.CompletedProcess[str], attempt: int) -> None:
+    stdout = result.stdout or ""
+    stderr = result.stderr or ""
+    (log_dir / f"clone_{attempt:02d}.stdout").write_text(stdout, encoding="utf-8", errors="replace")
+    (log_dir / f"clone_{attempt:02d}.stderr").write_text(stderr, encoding="utf-8", errors="replace")
+    (log_dir / "clone.stdout").write_text(stdout, encoding="utf-8", errors="replace")
+    (log_dir / "clone.stderr").write_text(stderr, encoding="utf-8", errors="replace")
+
+
+def _is_usable_repo(repo_path: Path) -> bool:
+    if not repo_path.exists() or not repo_path.is_dir():
+        return False
+    if not _has_worktree_files(repo_path):
+        return False
+    git_dir = repo_path / ".git"
+    if git_dir.exists():
+        return _git_commit(repo_path) is not None
+    return True
+
+
+def _has_worktree_files(repo_path: Path) -> bool:
+    try:
+        children = [path for path in repo_path.iterdir() if path.name != ".git"]
+    except OSError:
+        return False
+    if not children:
+        return False
+    markers = {"README.md", "README.rst", "README.txt", "readme.md", "setup.py", "pyproject.toml", "requirements.txt", "environment.yml", "environment.yaml"}
+    if any(path.name in markers for path in children):
+        return True
+    return any(path.is_file() for path in children) or any(path.is_dir() for path in children)
+
+
+def _remove_path(path: Path) -> None:
+    if path.exists():
+        shutil.rmtree(path)
 
 
 def _git_commit(repo_path: Path) -> str | None:

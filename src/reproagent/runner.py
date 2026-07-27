@@ -1,6 +1,7 @@
 """Command execution utilities."""
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -64,7 +65,7 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
     backend_command = build_backend_command(env_name, command, conda=find_conda())
     start = time.monotonic()
     try:
-        result = subprocess.run(backend_command, cwd=str(cwd), text=True, capture_output=True, timeout=timeout)
+        result = subprocess.run(backend_command, cwd=str(cwd), text=True, capture_output=True, timeout=timeout, env=_command_env(workspace))
         stdout = result.stdout or ""
         stderr = result.stderr or ""
         code = result.returncode
@@ -76,6 +77,23 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
     stdout_path.write_text(stdout, encoding="utf-8", errors="replace")
     stderr_path.write_text(stderr, encoding="utf-8", errors="replace")
     return CommandResult(command=command, exit_code=code, stdout_path=stdout_path, stderr_path=stderr_path, duration_seconds=duration, backend_command=backend_command)
+
+
+def _command_env(workspace: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    tmp_dir = workspace / ".tmp"
+    pip_cache_dir = workspace / ".cache" / "pip"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    pip_cache_dir.mkdir(parents=True, exist_ok=True)
+    env["TMPDIR"] = str(tmp_dir)
+    env["TMP"] = str(tmp_dir)
+    env["TEMP"] = str(tmp_dir)
+    env["PIP_CACHE_DIR"] = str(pip_cache_dir)
+    env.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
+    omp = env.get("OMP_NUM_THREADS", "").strip()
+    if not omp.isdigit() or int(omp) <= 0:
+        env["OMP_NUM_THREADS"] = "16"
+    return env
 
 
 def _write_blocked_result(command: str, workspace: Path, stage: str, attempt: int, index: int, reason: str) -> CommandResult:

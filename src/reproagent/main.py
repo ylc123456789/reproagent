@@ -19,7 +19,13 @@ def run_task(task: ReproTask) -> ReproState:
     save_state(state)
 
     state.status = "collecting_context"
-    state.repo_context = collect_context(task)
+    try:
+        state.repo_context = collect_context(task)
+    except Exception as exc:
+        state.status = "failed"
+        state.final_summary = f"Context collection failed: {exc}"
+        write_result(state)
+        return state
     save_state(state)
 
     state.status = "preparing_conda_environment"

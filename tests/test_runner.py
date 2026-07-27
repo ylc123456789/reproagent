@@ -54,3 +54,19 @@ def test_blocks_real_parent_directory_traversal():
     ok, reason = is_safe_command("python ../train.py", stage="experiment")
     assert not ok
     assert "parent-directory" in reason
+
+
+def test_command_env_sets_workspace_cache_and_valid_omp(tmp_path, monkeypatch):
+    from reproagent.runner import _command_env
+
+    monkeypatch.setenv("OMP_NUM_THREADS", "not-a-number")
+
+    env = _command_env(tmp_path)
+
+    assert env["TMPDIR"] == str(tmp_path / ".tmp")
+    assert env["TMP"] == str(tmp_path / ".tmp")
+    assert env["TEMP"] == str(tmp_path / ".tmp")
+    assert env["PIP_CACHE_DIR"] == str(tmp_path / ".cache" / "pip")
+    assert env["OMP_NUM_THREADS"] == "16"
+    assert (tmp_path / ".tmp").is_dir()
+    assert (tmp_path / ".cache" / "pip").is_dir()

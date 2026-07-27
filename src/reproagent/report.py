@@ -2,6 +2,22 @@
 from __future__ import annotations
 from .models import ReproState
 
+MOJIBAKE_REPLACEMENTS = {
+    "鈥檚": "'s",
+    "鈥檛": "'t",
+    "鈥檙": "'r",
+    "鈥檝": "'v",
+    "鈥檓": "'m",
+    "鈥檒": "'l",
+    "鈥檇": "'d",
+    "鈥?": "-",
+    "鈥": "-",
+    "憇": "s",
+    "憆": "r",
+    "慳": "a",
+    "慛": "N",
+}
+
 
 def save_state(state: ReproState):
     state.task.workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -64,7 +80,7 @@ def write_result(state: ReproState):
     lines += _stage_lines("Environment Attempts", state.environment_attempts)
     lines += _stage_lines("Experiment Attempts", state.experiment_attempts)
     lines += ["## Final Summary", "", state.final_summary or "No final summary.", ""]
-    path.write_text("\n".join(lines), encoding="utf-8")
+    path.write_text(_clean_text("\n".join(lines)), encoding="utf-8")
     save_state(state)
     return path
 
@@ -90,3 +106,10 @@ def _stage_lines(title: str, attempts) -> list[str]:
             ]
         lines.append("")
     return lines
+
+
+def _clean_text(text: str) -> str:
+    cleaned = text
+    for bad, replacement in MOJIBAKE_REPLACEMENTS.items():
+        cleaned = cleaned.replace(bad, replacement)
+    return cleaned
