@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
+import threading
 import time
 from pathlib import Path
 
@@ -46,20 +48,57 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
     stdout_path = logs / f"{prefix}.stdout"
     stderr_path = logs / f"{prefix}.stderr"
     backend_command = build_backend_command(env_name, command, conda=find_conda())
+    print(f"[reproagent] running {stage} command {attempt}.{index}: {command}", flush=True)
     start = time.monotonic()
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+    code = -1
+    process: subprocess.Popen[str] | None = None
     try:
-        result = subprocess.run(backend_command, cwd=str(cwd), text=True, capture_output=True, timeout=timeout, env=_command_env(workspace))
-        stdout = result.stdout or ""
-        stderr = result.stderr or ""
-        code = result.returncode
+        process = subprocess.Popen(
+            backend_command,
+            cwd=str(cwd),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=1,
+            env=_command_env(workspace),
+        )
+        threads = [
+            threading.Thread(target=_stream_pipe, args=(process.stdout, sys.stdout, stdout_chunks), daemon=True),
+            threading.Thread(target=_stream_pipe, args=(process.stderr, sys.stderr, stderr_chunks), daemon=True),
+        ]
+        for thread in threads:
+            thread.start()
+        code = process.wait(timeout=timeout)
+        for thread in threads:
+            thread.join(timeout=1)
     except subprocess.TimeoutExpired:
-        stdout = ""
-        stderr = f"Command timed out after {timeout}s"
+        if process is not None:
+            process.kill()
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
+        message = f"Command timed out after {timeout}s\n"
+        stderr_chunks.append(message)
+        print(message, file=sys.stderr, end="", flush=True)
         code = -1
     duration = round(time.monotonic() - start, 2)
-    stdout_path.write_text(stdout, encoding="utf-8", errors="replace")
-    stderr_path.write_text(stderr, encoding="utf-8", errors="replace")
+    stdout_path.write_text("".join(stdout_chunks), encoding="utf-8", errors="replace")
+    stderr_path.write_text("".join(stderr_chunks), encoding="utf-8", errors="replace")
+    print(f"[reproagent] finished {stage} command {attempt}.{index}: exit={code}, duration={duration}s", flush=True)
     return CommandResult(command=command, exit_code=code, stdout_path=stdout_path, stderr_path=stderr_path, duration_seconds=duration, backend_command=backend_command)
+
+
+def _stream_pipe(pipe, display, chunks: list[str]) -> None:
+    if pipe is None:
+        return
+    try:
+        for line in pipe:
+            chunks.append(line)
+            print(line, file=display, end="", flush=True)
+    finally:
+        pipe.close()
 
 
 def _command_env(workspace: Path) -> dict[str, str]:
