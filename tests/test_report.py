@@ -29,3 +29,16 @@ def test_clean_text_repairs_latin1_utf8_mojibake():
     cleaned = _clean_text(text)
 
     assert cleaned == "paper’s GPU–accelerated run"
+
+
+def test_write_result_includes_experiment_goal(tmp_path):
+    from reproagent.models import ReproState, ReproTask
+    from reproagent.report import write_result
+
+    goal = "Run MNIST ODE-Net and report accuracy."
+    task = ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path, experiment_goal=goal)
+    state = ReproState(task=task, status="completed")
+
+    path = write_result(state)
+
+    assert f"Experiment goal: {goal}" in path.read_text(encoding="utf-8")

@@ -20,7 +20,7 @@ Important: the system already runs every command inside a prepared conda environ
 def plan_environment(state: ReproState) -> CommandPlan:
     prompt = _base_context(state) + """
 
-Plan dependency setup commands needed inside the already-created conda environment for the final goal: faithful reproduction of the paper's experiments/results.
+Plan dependency setup commands needed inside the already-created conda environment for the experiment goal and final reproduction target.
 Return JSON with fields: stage, summary, commands, assumptions, stop_reason.
 Use stage='environment'. Prefer project-provided files such as requirements.txt, pyproject.toml, setup.py, or environment.yml when appropriate, but do not blindly accept an unconstrained latest GPU framework package if it conflicts with the detected hardware.
 If an NVIDIA GPU is visible and the project uses PyTorch/JAX/TensorFlow, configure a GPU-capable build compatible with the reported driver/CUDA capability. For PyTorch, inspect the repo pins first; if the repo only says something broad like torch>=x, choose an official build compatible with this machine instead of defaulting to the newest CUDA build.
@@ -33,24 +33,14 @@ If no setup is needed, commands may be empty.
     return _complete_plan(state, prompt, stage="environment")
 
 
-def _experiment_policy(state: ReproState) -> str:
-    profile = state.task.experiment_profile
-    if profile == "smoke":
-        return """Experiment profile: smoke. Choose a short reproduction smoke/evaluation expected to finish in a few minutes. Prefer, in order: (1) a tiny inline GPU workload that imports the project and performs one minimal operation, (2) one small targeted test file, (3) one documented small demo with bounded runtime. Avoid dataset downloads, MNIST/full training, multi-epoch training, or long examples."""
-    if profile == "medium":
-        return """Experiment profile: medium. Choose one bounded repo-provided experiment that is closer to a paper result than a pure smoke test, preferably a small/short version of a central experiment. Dataset downloads are allowed if they are standard small public datasets such as MNIST. Prefer explicit GPU flags when available. Prefer command-line arguments that limit epochs/iterations/batches/runtime while still producing a metric. Do not start multi-hour full reproduction runs; if no bounded option exists, run the closest documented GPU example and describe the full command in stop_reason."""
-    return """Experiment profile: full. Choose commands intended to reproduce the paper's reported experiments as faithfully as possible. Use documented repo scripts and hyperparameters when available, use GPU when supported, and explain expected runtime/data/checkpoints in assumptions. Avoid unsafe commands, but full training/evaluation is allowed when it is required for reproduction."""
-
-
 def plan_experiment(state: ReproState) -> CommandPlan:
-    prompt = _base_context(state) + _recent_logs(state) + f"""
+    prompt = _base_context(state) + _recent_logs(state) + """
 
-Plan the next experiment/demo/evaluation commands to try.
+Plan the next experiment/demo/evaluation commands to execute for the experiment goal.
 Return JSON with fields: stage, summary, commands, assumptions, stop_reason.
-Use stage='experiment'. Prefer bounded commands that can produce a metric or verify the repo runs with the configured hardware.
-{_experiment_policy(state)}
-Avoid aggregate test suites such as tests/run_all.py or bare pytest over the whole repo unless the experiment profile is full and the suite is explicitly part of reproduction.
-If full paper reproduction requires expensive training or datasets and the profile is not full, do not start it by default; describe the required command, data, expected runtime, and assumptions in stop_reason/assumptions so the report records the next step.
+Use stage='experiment'. The experiment goal is the contract for this run: choose commands that directly attempt it, or explain clearly in assumptions/stop_reason why a smaller prerequisite or diagnostic command is needed first.
+Prefer repo-provided scripts and documented arguments when available. If training or dataset downloads are required by the goal, they are allowed; keep commands within the user-provided timeout budget and state expected runtime, data, GPU use, and metrics in assumptions.
+Prefer commands that produce measurable evidence such as accuracy, loss, generated artifacts, or saved logs. Do not silently substitute an unrelated demo for the requested goal.
 Do not use conda activate; commands already run inside the prepared conda environment.
 """
     return _complete_plan(state, prompt, stage="experiment")
@@ -64,7 +54,7 @@ Return JSON with fields: stage, summary, commands, assumptions, stop_reason.
 If the audit says GPU repair is required, fix the installed ML framework build so GPU is available on this hardware, unless the repo clearly does not use that framework. Prefer explicit uninstall/reinstall commands for incompatible packages when needed.
 If the audit says NumPy ABI repair is required, pin or downgrade NumPy, commonly `pip install "numpy<2"`, then rerun a quick import/device check.
 For environment-stage revisions, do not run repository demos/examples/training. Validate with quick import/version/device checks only; real demos belong in the experiment stage after audit passes.
-For experiment-stage revisions, prefer shorter bounded checks after a timeout, such as a tiny inline operation or a single targeted test file. Do not escalate to aggregate test suites, dataset downloads, or training jobs unless explicitly necessary.
+For experiment-stage revisions, stay anchored to the experiment goal. If a command fails, repair missing dependencies, arguments, paths, data locations, or hardware settings and retry the closest goal-directed command. If the exact goal appears too expensive or impossible within the timeout, run the smallest goal-relevant diagnostic and explain the deviation in assumptions/stop_reason.
 If using `python -c`, do not define a `def` function on a semicolon-separated one-liner; use a lambda or a short import/device check instead.
 Do not use conda activate; commands already run inside the prepared conda environment.
 """
@@ -76,7 +66,7 @@ def final_review(state: ReproState) -> str:
         return _mock_final_review(state)
     prompt = _base_context(state) + _recent_logs(state) + """
 
-Write a concise reproduction result summary. Explain what worked, what failed, whether any metrics were found, whether the run used GPU or CPU fallback, and what human input is needed next. Return plain Markdown.
+Write a concise reproduction result summary. Explain the experiment goal, what worked, what failed, whether the goal was achieved or only partially achieved, what metrics were found, whether the run used GPU or CPU fallback, and what human input is needed next. Return plain Markdown.
 """
     return _openai_compatible_text(state, prompt)
 
@@ -152,6 +142,8 @@ def _base_context(state: ReproState) -> str:
     return f"""
 Paper URL: {state.task.paper_url}
 Repo URL: {state.task.repo_url}
+Experiment goal: {state.task.experiment_goal or 'No explicit experiment goal provided.'}
+Timeout budget per command: {state.task.timeout_seconds}s
 Repo path: {ctx.repo_path}
 Commit: {ctx.commit_hash}
 {env_text}

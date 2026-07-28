@@ -24,7 +24,8 @@ class ReproTask(BaseModel):
     api_key_env: str = "OPENAI_API_KEY"
     backend: Literal["conda"] = "conda"
     python_version: str = "3.10"
-    experiment_profile: Literal["smoke", "medium", "full"] = "smoke"
+    experiment_goal: str = ""
+    confirm_before_experiment: bool = False
 
 class RepoContext(BaseModel):
     repo_path: Path

@@ -10,6 +10,7 @@ Input:
 paper_url
 repo_url
 workspace_dir
+experiment_goal
 ```
 
 Output:
@@ -20,7 +21,7 @@ state.json
 logs/
 ```
 
-The central goal is to let an LLM read repository context and paper reference, decide how a human would try to reproduce the experiment, execute the plan inside an isolated conda environment, and revise the plan after failures.
+The central goal is to let an LLM read repository context, paper reference, and the user-provided experiment goal, decide how a human would try to reproduce that target, execute the plan inside an isolated conda environment, and revise the plan after failures.
 
 ## 2. Project Path
 
@@ -68,7 +69,7 @@ otherwise               -> conda create -n <env> python=<version> -y
 All LLM-proposed commands run through:
 
 ```bash
-conda run -n <env> bash -lc "<command>"
+conda run -n <env> bash -c "<command>"
 ```
 
 This avoids fragile non-interactive `conda activate` behavior.
@@ -93,10 +94,11 @@ Each loop can retry locally. A failed environment command does not restart the w
 ```text
 Build Context
   -> Create/reuse conda env
-  -> Env plan by LLM
+  -> Env plan by LLM for the experiment goal
   -> Run env commands inside conda env
   -> if failed: send logs back to LLM and retry env stage
-  -> Experiment plan by LLM
+  -> Experiment plan by LLM for the experiment goal
+  -> optionally ask user to confirm the experiment plan
   -> Run experiment commands inside conda env
   -> if failed: send logs back to LLM and retry experiment stage
   -> Result review
@@ -142,11 +144,10 @@ This MVP does not yet do:
 automatic SOTA discovery
 automatic repository discovery
 Docker backend
-GPU/CUDA automatic configuration
 large dataset management
 paper PDF table verification
 full blackboard architecture
 web UI
 ```
 
-The next milestone is: choose a small CPU-friendly ML repo, use DeepSeek/OpenAI-compatible API to plan setup/run commands, execute them in conda, and produce an honest result file.
+The next milestone is: pass a concrete reproduction target, use a DeepSeek/OpenAI-compatible API to plan setup/run commands, execute them in conda, and produce an honest result file with metrics, deviations, and logs.

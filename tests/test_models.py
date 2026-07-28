@@ -14,7 +14,8 @@ if __name__ == "__main__":
     unittest.main()
 
 
-def test_task_default_experiment_profile_is_smoke(tmp_path):
+def test_task_default_experiment_goal_is_empty(tmp_path):
     task = ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path)
 
-    assert task.experiment_profile == "smoke"
+    assert task.experiment_goal == ""
+    assert not task.confirm_before_experiment

@@ -2,7 +2,7 @@
 
 LLM-first machine learning paper reproduction runner.
 
-Given a paper URL and a repository URL, `reproagent` asks an LLM how to set up and run the project, executes the proposed commands inside an isolated conda environment, retries failed stages with log feedback, and writes a local reproduction result.
+Given a paper URL, repository URL, and concrete experiment goal, `reproagent` asks an LLM how to set up and run the project, executes the proposed commands inside an isolated conda environment, retries failed stages with log feedback, and writes a local reproduction result.
 
 This project is intentionally small. It is not a full autonomous research agent yet.
 
@@ -53,13 +53,14 @@ A Python venv also works for local development, but the conda setup above is the
 
 ## Run with Mock LLM
 
-Mock mode is useful for CLI smoke tests, but still requires conda because commands run through the conda backend.
+Mock mode is useful for local CLI tests, but still requires conda because commands run through the conda backend.
 
 ```bash
 reproagent run \
   --paper https://arxiv.org/abs/2301.07093 \
   --repo https://github.com/milesial/Pytorch-UNet \
   --workspace runs/unet-demo \
+  --experiment-goal "Run a minimal import/version check for the repository." \
   --mock-llm
 ```
 
@@ -71,6 +72,7 @@ reproagent run \
   --paper https://arxiv.org/abs/xxxx.xxxxx \
   --repo https://github.com/user/project \
   --workspace runs/demo \
+  --experiment-goal "Run the paper's main bounded evaluation and report the primary metric." \
   --model gpt-4.1-mini
 ```
 
@@ -82,6 +84,7 @@ reproagent run \
   --paper https://arxiv.org/abs/xxxx.xxxxx \
   --repo https://github.com/user/project \
   --workspace runs/demo \
+  --experiment-goal "Run the requested reproduction target and report metrics, logs, and any deviations." \
   --api-base https://api.deepseek.com/v1 \
   --api-key-env DEEPSEEK_API_KEY \
   --model deepseek-v4pro
@@ -97,11 +100,12 @@ The MVP is conda-first:
 1. clone repo
 2. collect README/docs/file-tree context
 3. create a task-specific conda env
-4. ask LLM for dependency setup commands
+4. ask LLM for dependency setup commands needed for the experiment goal
 5. run setup commands with conda run -n <env>
-6. ask LLM for experiment/eval/demo commands
-7. run commands with conda run -n <env>
-8. write result.md and state.json
+6. ask LLM for experiment/eval/demo commands that directly attempt the goal
+7. optionally confirm before running experiment commands
+8. run commands with conda run -n <env>
+9. write result.md and state.json
 ```
 
 LLM commands should not contain `conda activate`, `conda create`, or `conda run`; `reproagent` wraps commands itself.

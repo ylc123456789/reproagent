@@ -9,9 +9,7 @@ from pathlib import Path
 from .env import build_backend_command, find_conda
 from .models import CommandResult
 
-BLOCKED_SNIPPETS = ["sudo", "rm -rf", "curl", "wget", "| bash", "> /", "shutdown", "reboot", "conda activate"]
-ENV_STAGE_LONG_RUNNING_HINTS = ["examples/", "train.py", "demo.py", "mnist", "epoch", "--epochs"]
-EXPERIMENT_BROAD_HINTS = ["tests/run_all.py", "run_all.py"]
+BLOCKED_SNIPPETS = ["sudo", "rm -rf", "| bash", "> /", "shutdown", "reboot", "conda activate"]
 
 
 def is_safe_command(command: str, stage: str | None = None) -> tuple[bool, str | None]:
@@ -21,22 +19,7 @@ def is_safe_command(command: str, stage: str | None = None) -> tuple[bool, str |
             return False, f"blocked unsafe snippet: {bad}"
     if _has_parent_directory_traversal(command):
         return False, "blocked parent-directory traversal"
-    if stage == "environment":
-        for hint in ENV_STAGE_LONG_RUNNING_HINTS:
-            if hint in lowered:
-                return False, f"environment stage should not run experiment/demo/training command: {hint}"
-    if stage == "experiment":
-        for hint in EXPERIMENT_BROAD_HINTS:
-            if hint in lowered:
-                return False, f"experiment stage should start with a targeted small test, not broad command: {hint}"
-        if _is_bare_pytest(lowered):
-            return False, "experiment stage should target a small test file, not the whole pytest suite"
     return True, None
-
-
-def _is_bare_pytest(lowered_command: str) -> bool:
-    normalized = " ".join(lowered_command.split())
-    return normalized in {"pytest", "python -m pytest"}
 
 
 def _has_parent_directory_traversal(command: str) -> bool:
