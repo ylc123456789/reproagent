@@ -118,4 +118,24 @@ def test_plan_experiment_requires_goal_constraints_from_probe(tmp_path, monkeypa
     assert "Do not assume default script parameters" in captured["prompt"]
     assert "--nepochs NEPOCHS" in captured["prompt"]
     assert "attention heads" in captured["prompt"]
+    assert "Do not use cd, tee" in captured["prompt"]
+    assert "does not print" in captured["prompt"]
     assert plan.commands == ["python examples/odenet_mnist.py --nepochs 1 --gpu 0"]
+
+
+def test_complete_plan_drops_false_needs_user_input(tmp_path, monkeypatch):
+    from reproagent import llm
+    from reproagent.models import RepoContext, ReproState, ReproTask
+
+    def fake_complete(state, prompt):
+        return '{"stage":"experiment","summary":"s","commands":[],"assumptions":[],"needs_user_input":false}'
+
+    state = ReproState(
+        task=ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path),
+        repo_context=RepoContext(repo_path=tmp_path),
+    )
+    monkeypatch.setattr(llm, "_openai_compatible_text", fake_complete)
+
+    plan = llm.plan_experiment(state)
+
+    assert plan.needs_user_input == []

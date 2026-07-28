@@ -71,7 +71,7 @@ def test_command_env_sets_workspace_cache_and_valid_omp(tmp_path, monkeypatch):
     assert (tmp_path / ".cache" / "pip").is_dir()
 
 
-def test_run_one_streams_output_and_writes_logs(tmp_path, monkeypatch, capsys):
+def test_run_one_writes_full_logs_but_only_streams_experiment_progress(tmp_path, monkeypatch, capsys):
     from reproagent import runner
 
     monkeypatch.setattr(runner, "find_conda", lambda: None)
@@ -81,7 +81,7 @@ def test_run_one_streams_output_and_writes_logs(tmp_path, monkeypatch, capsys):
         lambda env_name, command, conda=None: [
             "python",
             "-c",
-            "import sys; print('hello stdout'); print('hello stderr', file=sys.stderr)",
+            "import sys; print('download noise'); print('Epoch 1 | loss 0.5 | Test Acc 0.9', file=sys.stderr)",
         ],
     )
 
@@ -89,10 +89,29 @@ def test_run_one_streams_output_and_writes_logs(tmp_path, monkeypatch, capsys):
     captured = capsys.readouterr()
 
     assert result.exit_code == 0
-    assert "hello stdout" in captured.out
-    assert "hello stderr" in captured.err
-    assert result.stdout_path.read_text(encoding="utf-8") == "hello stdout\n"
-    assert result.stderr_path.read_text(encoding="utf-8") == "hello stderr\n"
+    assert "download noise" not in captured.out
+    assert "Epoch 1" in captured.err
+    assert result.stdout_path.read_text(encoding="utf-8") == "download noise\n"
+    assert result.stderr_path.read_text(encoding="utf-8") == "Epoch 1 | loss 0.5 | Test Acc 0.9\n"
+
+
+def test_run_one_suppresses_environment_and_probe_raw_output(tmp_path, monkeypatch, capsys):
+    from reproagent import runner
+
+    monkeypatch.setattr(runner, "find_conda", lambda: None)
+    monkeypatch.setattr(
+        runner,
+        "build_backend_command",
+        lambda env_name, command, conda=None: ["python", "-c", "print('very noisy output')"],
+    )
+
+    env_result = runner._run_one("ignored", tmp_path, tmp_path, "environment", 1, 1, 10, "env")
+    probe_result = runner._run_one("ignored", tmp_path, tmp_path, "probe", 1, 2, 10, "env")
+    captured = capsys.readouterr()
+
+    assert "very noisy output" not in captured.out
+    assert env_result.stdout_path.read_text(encoding="utf-8") == "very noisy output\n"
+    assert probe_result.stdout_path.read_text(encoding="utf-8") == "very noisy output\n"
 
 
 def test_run_one_timeout_writes_timeout_to_stderr(tmp_path, monkeypatch):

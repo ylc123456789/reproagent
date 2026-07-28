@@ -16,7 +16,7 @@ Command-plan JSON fields are: stage, summary, commands, assumptions, feasibility
 Environment-stage commands must only install dependencies or run quick import/version/device checks; do not run repository demos, examples, training scripts, or long evaluations during environment setup.
 If an NVIDIA GPU is visible, prioritize a GPU-capable ML environment and choose dependency builds compatible with the reported driver/CUDA capability. Do not blindly install the newest PyTorch/JAX/TensorFlow build.
 Do not suggest destructive commands. If data or checkpoints are missing, say so.
-Important: the system already runs every command inside a prepared conda environment. Do not use `conda activate`, `conda create`, or `conda run` in your commands.
+Important: the system already runs every command inside the repository root and inside a prepared conda environment. Do not use `cd`, `tee`, shell output redirection for logs, `conda activate`, `conda create`, or `conda run` in your commands. The runner captures stdout/stderr and writes logs.
 """
 
 
@@ -58,8 +58,8 @@ Do not assume default script parameters satisfy the goal. If the goal says bound
 Prefer repo-provided scripts and documented arguments when available. If the repo uses YAML/JSON config files, prefer creating or referencing a run-specific config in the workspace rather than editing upstream defaults. If a goal requires modifying original project code, set feasibility='needs_patch' and explain the minimal patch needed instead of silently changing behavior.
 Check parameter constraints before proposing hyperparameter changes. For architecture-coupled settings such as attention heads, hidden sizes, checkpoint shapes, image sizes, or class counts, state the constraint and avoid incompatible changes.
 If training or dataset downloads are required by the goal, they are allowed; keep commands within the user-provided timeout budget and state expected runtime, data, GPU use, and metrics in assumptions.
-Prefer commands that produce measurable evidence such as accuracy, loss, generated artifacts, or saved logs. Do not silently substitute an unrelated demo for the requested goal.
-Do not use conda activate; commands already run inside the prepared conda environment.
+Prefer commands that produce measurable evidence such as accuracy, loss, generated artifacts, or saved logs. Do not silently substitute an unrelated demo for the requested goal. If the goal asks for a metric that the discovered script does not print, set feasibility='needs_patch' or explicitly state the metric is unavailable from the unmodified repo; do not claim it can be extracted from logs.
+Do not use cd, tee, shell log redirection, or conda activate; commands already run inside the repository root and prepared conda environment, and the runner captures logs.
 """
     return _complete_plan(state, prompt, stage="experiment")
 
@@ -74,7 +74,7 @@ If the audit says NumPy ABI repair is required, pin or downgrade NumPy, commonly
 For environment-stage revisions, do not run repository demos/examples/training. Validate with quick import/version/device checks only; real demos belong in the experiment stage after audit passes.
 For experiment-stage revisions, stay anchored to the experiment goal. If a command fails, repair missing dependencies, arguments, paths, data locations, or hardware settings and retry the closest goal-directed command. If the exact goal appears too expensive or impossible within the timeout, set feasibility='blocked' or feasibility='unsafe_or_too_expensive' and explain the smallest goal-relevant diagnostic or required human decision in assumptions/stop_reason.
 If using `python -c`, do not define a `def` function on a semicolon-separated one-liner; use a lambda or a short import/device check instead.
-Do not use conda activate; commands already run inside the prepared conda environment.
+Do not use cd, tee, shell log redirection, or conda activate; commands already run inside the repository root and prepared conda environment, and the runner captures logs.
 """
     return _complete_plan(state, prompt, stage=stage)
 
@@ -110,13 +110,13 @@ def _complete_plan(state: ReproState, prompt: str, stage: str) -> CommandPlan:
         assumptions=_as_list(data.get("assumptions", [])),
         feasibility=feasibility,
         expected_runtime=data.get("expected_runtime"),
-        needs_user_input=_as_list(data.get("needs_user_input", [])),
+        needs_user_input=_as_list(data.get("needs_user_input", []), drop_false=True),
         stop_reason=data.get("stop_reason"),
     )
 
 
-def _as_list(value) -> list[str]:
-    if value is None:
+def _as_list(value, drop_false: bool = False) -> list[str]:
+    if value is None or (drop_false and value is False):
         return []
     if isinstance(value, str):
         return [value]

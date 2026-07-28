@@ -59,6 +59,7 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
     stderr_path = logs / f"{prefix}.stderr"
     backend_command = build_backend_command(env_name, command, conda=find_conda())
     print(f"[reproagent] running {stage} command {attempt}.{index}: {command}", flush=True)
+    print(f"[reproagent] logs: stdout={stdout_path}, stderr={stderr_path}", flush=True)
     start = time.monotonic()
     stdout_chunks: list[str] = []
     stderr_chunks: list[str] = []
@@ -75,8 +76,8 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
             env=_command_env(workspace),
         )
         threads = [
-            threading.Thread(target=_stream_pipe, args=(process.stdout, sys.stdout, stdout_chunks), daemon=True),
-            threading.Thread(target=_stream_pipe, args=(process.stderr, sys.stderr, stderr_chunks), daemon=True),
+            threading.Thread(target=_stream_pipe, args=(process.stdout, sys.stdout, stdout_chunks, stage), daemon=True),
+            threading.Thread(target=_stream_pipe, args=(process.stderr, sys.stderr, stderr_chunks, stage), daemon=True),
         ]
         for thread in threads:
             thread.start()
@@ -100,15 +101,44 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
     return CommandResult(command=command, exit_code=code, stdout_path=stdout_path, stderr_path=stderr_path, duration_seconds=duration, backend_command=backend_command)
 
 
-def _stream_pipe(pipe, display, chunks: list[str]) -> None:
+def _stream_pipe(pipe, display, chunks: list[str], stage: str) -> None:
     if pipe is None:
         return
     try:
         for line in pipe:
             chunks.append(line)
-            print(line, file=display, end="", flush=True)
+            if _should_display_line(stage, line):
+                print(line, file=display, end="", flush=True)
     finally:
         pipe.close()
+
+
+def _should_display_line(stage: str, line: str) -> bool:
+    if stage != "experiment":
+        return False
+    lowered = line.lower()
+    markers = (
+        "epoch",
+        "iter",
+        "step",
+        "loss",
+        "acc",
+        "accuracy",
+        "test",
+        "val",
+        "eval",
+        "nfe",
+        "eta",
+        "%",
+        "it/s",
+        "real	",
+        "runtime",
+        "error",
+        "traceback",
+        "cuda",
+        "gpu",
+    )
+    return any(marker in lowered for marker in markers)
 
 
 def _command_env(workspace: Path) -> dict[str, str]:
