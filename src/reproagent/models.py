@@ -4,6 +4,9 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
+
+StageName = Literal["environment", "probe", "experiment"]
+Feasibility = Literal["ready_to_run", "needs_config", "needs_patch", "blocked", "unsafe_or_too_expensive"]
 from pydantic import BaseModel, Field
 
 def _task_id() -> str:
@@ -26,6 +29,7 @@ class ReproTask(BaseModel):
     python_version: str = "3.10"
     experiment_goal: str = ""
     confirm_before_experiment: bool = False
+    plan_only: bool = False
 
 class RepoContext(BaseModel):
     repo_path: Path
@@ -55,10 +59,13 @@ class EnvironmentAudit(BaseModel):
     stderr_path: Path | None = None
 
 class CommandPlan(BaseModel):
-    stage: Literal["environment", "experiment"]
+    stage: StageName
     summary: str
     commands: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
+    feasibility: Feasibility | None = None
+    expected_runtime: str | None = None
+    needs_user_input: list[str] = Field(default_factory=list)
     stop_reason: str | None = None
 
 class CommandResult(BaseModel):
@@ -73,7 +80,7 @@ class CommandResult(BaseModel):
         return self.exit_code == 0
 
 class StageResult(BaseModel):
-    stage: Literal["environment", "experiment"]
+    stage: StageName
     attempt: int
     plan: CommandPlan
     results: list[CommandResult] = Field(default_factory=list)
@@ -88,6 +95,8 @@ class ReproState(BaseModel):
     environment: EnvironmentInfo | None = None
     environment_audit: EnvironmentAudit | None = None
     environment_attempts: list[StageResult] = Field(default_factory=list)
+    probe_attempts: list[StageResult] = Field(default_factory=list)
+    planned_experiment: CommandPlan | None = None
     experiment_attempts: list[StageResult] = Field(default_factory=list)
     final_summary: str = ""
     result_path: Path | None = None

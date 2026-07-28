@@ -7,9 +7,12 @@ import urllib.request
 
 from .models import CommandPlan, ReproState
 
+FEASIBILITIES = {"ready_to_run", "needs_config", "needs_patch", "blocked", "unsafe_or_too_expensive"}
+
 SYSTEM = """You are a careful machine-learning reproducibility engineer.
 The final goal is faithful reproduction of the paper's reported experiments and results, not merely a smoke test.
 Return strict JSON only for command plans. Prefer safe inspection, evaluation, demo, or test commands before full training, but configure the environment for the final reproduction target.
+Command-plan JSON fields are: stage, summary, commands, assumptions, feasibility, expected_runtime, needs_user_input, stop_reason. Use feasibility values: ready_to_run, needs_config, needs_patch, blocked, unsafe_or_too_expensive.
 Environment-stage commands must only install dependencies or run quick import/version/device checks; do not run repository demos, examples, training scripts, or long evaluations during environment setup.
 If an NVIDIA GPU is visible, prioritize a GPU-capable ML environment and choose dependency builds compatible with the reported driver/CUDA capability. Do not blindly install the newest PyTorch/JAX/TensorFlow build.
 Do not suggest destructive commands. If data or checkpoints are missing, say so.
@@ -33,13 +36,28 @@ If no setup is needed, commands may be empty.
     return _complete_plan(state, prompt, stage="environment")
 
 
+def plan_probe(state: ReproState) -> CommandPlan:
+    prompt = _base_context(state) + _recent_logs(state) + """
+
+Plan safe probe commands to discover the experiment interface before any real training/evaluation.
+Return JSON with fields: stage, summary, commands, assumptions, feasibility, expected_runtime, needs_user_input, stop_reason.
+Use stage='probe'. Commands must only inspect files, print help, list configs, or run tiny inline checks. Good examples: `python train.py --help`, `python examples/odenet_mnist.py --help`, `find . -maxdepth 3 -iname '*.yaml'`, `sed -n '1,160p' configs/foo.yaml`.
+Do not run training, evaluation, demos, tests over datasets, downloads, or scripts without a help/config/listing flag in the probe stage.
+The purpose is to identify entry points, configurable parameters, config-file style, metric outputs, GPU flags, and constraints such as hidden_size divisibility or checkpoint compatibility.
+"""
+    return _complete_plan(state, prompt, stage="probe")
+
+
 def plan_experiment(state: ReproState) -> CommandPlan:
     prompt = _base_context(state) + _recent_logs(state) + """
 
-Plan the next experiment/demo/evaluation commands to execute for the experiment goal.
-Return JSON with fields: stage, summary, commands, assumptions, stop_reason.
-Use stage='experiment'. The experiment goal is the contract for this run: choose commands that directly attempt it, or explain clearly in assumptions/stop_reason why a smaller prerequisite or diagnostic command is needed first.
-Prefer repo-provided scripts and documented arguments when available. If training or dataset downloads are required by the goal, they are allowed; keep commands within the user-provided timeout budget and state expected runtime, data, GPU use, and metrics in assumptions.
+Plan the final experiment/demo/evaluation commands to execute for the experiment goal, using the probe logs above.
+Return JSON with fields: stage, summary, commands, assumptions, feasibility, expected_runtime, needs_user_input, stop_reason.
+Use stage='experiment'. The experiment goal is the contract for this run: choose commands that directly attempt it, or explain clearly in assumptions/stop_reason why the goal is blocked, too expensive, or requires config/code changes first.
+Do not assume default script parameters satisfy the goal. If the goal says bounded, short, one epoch, GPU, specific dataset, or specific metric, translate that into explicit CLI args or a generated config path whenever the repo interface supports it.
+Prefer repo-provided scripts and documented arguments when available. If the repo uses YAML/JSON config files, prefer creating or referencing a run-specific config in the workspace rather than editing upstream defaults. If a goal requires modifying original project code, set feasibility='needs_patch' and explain the minimal patch needed instead of silently changing behavior.
+Check parameter constraints before proposing hyperparameter changes. For architecture-coupled settings such as attention heads, hidden sizes, checkpoint shapes, image sizes, or class counts, state the constraint and avoid incompatible changes.
+If training or dataset downloads are required by the goal, they are allowed; keep commands within the user-provided timeout budget and state expected runtime, data, GPU use, and metrics in assumptions.
 Prefer commands that produce measurable evidence such as accuracy, loss, generated artifacts, or saved logs. Do not silently substitute an unrelated demo for the requested goal.
 Do not use conda activate; commands already run inside the prepared conda environment.
 """
@@ -54,7 +72,7 @@ Return JSON with fields: stage, summary, commands, assumptions, stop_reason.
 If the audit says GPU repair is required, fix the installed ML framework build so GPU is available on this hardware, unless the repo clearly does not use that framework. Prefer explicit uninstall/reinstall commands for incompatible packages when needed.
 If the audit says NumPy ABI repair is required, pin or downgrade NumPy, commonly `pip install "numpy<2"`, then rerun a quick import/device check.
 For environment-stage revisions, do not run repository demos/examples/training. Validate with quick import/version/device checks only; real demos belong in the experiment stage after audit passes.
-For experiment-stage revisions, stay anchored to the experiment goal. If a command fails, repair missing dependencies, arguments, paths, data locations, or hardware settings and retry the closest goal-directed command. If the exact goal appears too expensive or impossible within the timeout, run the smallest goal-relevant diagnostic and explain the deviation in assumptions/stop_reason.
+For experiment-stage revisions, stay anchored to the experiment goal. If a command fails, repair missing dependencies, arguments, paths, data locations, or hardware settings and retry the closest goal-directed command. If the exact goal appears too expensive or impossible within the timeout, set feasibility='blocked' or feasibility='unsafe_or_too_expensive' and explain the smallest goal-relevant diagnostic or required human decision in assumptions/stop_reason.
 If using `python -c`, do not define a `def` function on a semicolon-separated one-liner; use a lambda or a short import/device check instead.
 Do not use conda activate; commands already run inside the prepared conda environment.
 """
@@ -80,13 +98,19 @@ def _complete_plan(state: ReproState, prompt: str, stage: str) -> CommandPlan:
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"LLM did not return JSON: {text[:500]}") from exc
     returned_stage = data.get("stage", stage)
-    if returned_stage not in {"environment", "experiment"}:
+    if returned_stage not in {"environment", "probe", "experiment"}:
         returned_stage = stage
+    feasibility = data.get("feasibility")
+    if feasibility not in FEASIBILITIES:
+        feasibility = None
     return CommandPlan(
         stage=returned_stage,
         summary=str(data.get("summary", "")),
         commands=_as_list(data.get("commands", [])),
         assumptions=_as_list(data.get("assumptions", [])),
+        feasibility=feasibility,
+        expected_runtime=data.get("expected_runtime"),
+        needs_user_input=_as_list(data.get("needs_user_input", [])),
         stop_reason=data.get("stop_reason"),
     )
 
@@ -172,7 +196,7 @@ def _recent_logs(state: ReproState, max_chars: int = 12000) -> str:
             if path and path.exists():
                 text = path.read_text(encoding="utf-8", errors="replace")
                 chunks.append(f"--- {label} ---\n{text[-3000:]}\n")
-    attempts = state.environment_attempts[-2:] + state.experiment_attempts[-2:]
+    attempts = state.environment_attempts[-2:] + state.probe_attempts[-2:] + state.experiment_attempts[-2:]
     for attempt in attempts:
         chunks.append(f"\n## {attempt.stage} attempt {attempt.attempt}: {attempt.plan.summary}\n")
         for result in attempt.results[-3:]:
@@ -186,7 +210,9 @@ def _recent_logs(state: ReproState, max_chars: int = 12000) -> str:
 def _mock_plan(stage: str) -> CommandPlan:
     if stage == "environment":
         return CommandPlan(stage="environment", summary="Mock environment: no setup commands.", commands=[])
-    return CommandPlan(stage="experiment", summary="Mock experiment: inspect Python entry points.", commands=["python3 --version"])
+    if stage == "probe":
+        return CommandPlan(stage="probe", summary="Mock probe: inspect Python entry points.", commands=["python3 --version"], feasibility="ready_to_run")
+    return CommandPlan(stage="experiment", summary="Mock experiment: inspect Python entry points.", commands=["python3 --version"], feasibility="ready_to_run", expected_runtime="seconds")
 
 
 def _mock_final_review(state: ReproState) -> str:

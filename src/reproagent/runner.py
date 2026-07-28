@@ -21,7 +21,17 @@ def is_safe_command(command: str, stage: str | None = None) -> tuple[bool, str |
             return False, f"blocked unsafe snippet: {bad}"
     if _has_parent_directory_traversal(command):
         return False, "blocked parent-directory traversal"
+    if stage == "probe" and not _is_probe_command(command):
+        return False, "probe stage only allows help/config/listing/inline inspection commands"
     return True, None
+
+
+def _is_probe_command(command: str) -> bool:
+    lowered = command.strip().lower()
+    if "--help" in lowered or lowered.endswith(" -h") or " -h " in lowered:
+        return True
+    allowed_prefixes = ("ls", "find", "rg", "grep", "sed", "cat", "head", "tail", "pwd", "python -c", "python3 -c")
+    return lowered.startswith(allowed_prefixes)
 
 
 def _has_parent_directory_traversal(command: str) -> bool:

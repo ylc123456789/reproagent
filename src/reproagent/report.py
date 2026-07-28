@@ -98,6 +98,9 @@ def write_result(state: ReproState):
             f"- Audit stderr: `{state.environment_audit.stderr_path}`", "",
         ]
     lines += _stage_lines("Environment Attempts", state.environment_attempts)
+    lines += _stage_lines("Probe Attempts", state.probe_attempts)
+    if state.planned_experiment:
+        lines += _planned_experiment_lines(state.planned_experiment)
     lines += _stage_lines("Experiment Attempts", state.experiment_attempts)
     lines += ["## Final Summary", "", state.final_summary or "No final summary.", ""]
     path.write_text(_clean_text("\n".join(lines)), encoding="utf-8")
@@ -111,6 +114,12 @@ def _stage_lines(title: str, attempts) -> list[str]:
         return lines + ["No attempts recorded.", ""]
     for attempt in attempts:
         lines += [f"### Attempt {attempt.attempt}", "", f"Plan: {attempt.plan.summary}", ""]
+        if attempt.plan.feasibility:
+            lines += [f"Feasibility: `{attempt.plan.feasibility}`", ""]
+        if attempt.plan.expected_runtime:
+            lines += [f"Expected runtime: {attempt.plan.expected_runtime}", ""]
+        if attempt.plan.needs_user_input:
+            lines += ["Needs user input:"] + [f"- {x}" for x in attempt.plan.needs_user_input] + [""]
         if attempt.plan.assumptions:
             lines += ["Assumptions:"] + [f"- {x}" for x in attempt.plan.assumptions] + [""]
         if not attempt.results:
@@ -127,6 +136,25 @@ def _stage_lines(title: str, attempts) -> list[str]:
         lines.append("")
     return lines
 
+
+
+def _planned_experiment_lines(plan) -> list[str]:
+    lines = ["## Planned Experiment", "", f"Plan: {plan.summary}", ""]
+    if plan.feasibility:
+        lines += [f"Feasibility: `{plan.feasibility}`", ""]
+    if plan.expected_runtime:
+        lines += [f"Expected runtime: {plan.expected_runtime}", ""]
+    if plan.needs_user_input:
+        lines += ["Needs user input:"] + [f"- {x}" for x in plan.needs_user_input] + [""]
+    if plan.assumptions:
+        lines += ["Assumptions:"] + [f"- {x}" for x in plan.assumptions] + [""]
+    if plan.commands:
+        lines += ["Commands:"] + [f"{i}. `{command}`" for i, command in enumerate(plan.commands, start=1)] + [""]
+    else:
+        lines += ["No commands planned.", ""]
+    if plan.stop_reason:
+        lines += [f"Stop reason: {plan.stop_reason}", ""]
+    return lines
 
 def _clean_text(text: str) -> str:
     cleaned = _repair_latin1_mojibake(text)

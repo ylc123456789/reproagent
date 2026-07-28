@@ -2,7 +2,7 @@
 
 LLM-first machine learning paper reproduction runner.
 
-Given a paper URL, repository URL, and concrete experiment goal, `reproagent` asks an LLM how to set up and run the project, executes the proposed commands inside an isolated conda environment, retries failed stages with log feedback, and writes a local reproduction result.
+Given a paper URL, repository URL, and concrete experiment goal, `reproagent` asks an LLM how to set up and run the project, first probes the repository experiment interface, asks an LLM to produce a concrete execution plan, executes approved commands inside an isolated conda environment, retries failed stages with log feedback, and writes a local reproduction result.
 
 This project is intentionally small. It is not a full autonomous research agent yet.
 
@@ -64,6 +64,22 @@ reproagent run \
   --mock-llm
 ```
 
+## Plan Without Running Experiments
+
+Use `--plan-only` when you want the agent to set up the environment, run safe probe commands such as `--help`/config inspection, and write the final proposed experiment plan without starting training or evaluation.
+
+```bash
+reproagent run \
+  --paper https://arxiv.org/abs/xxxx.xxxxx \
+  --repo https://github.com/user/project \
+  --workspace runs/plan-demo \
+  --experiment-goal "Run a bounded GPU training experiment and report accuracy, loss, runtime, and deviations." \
+  --api-base https://api.deepseek.com/v1 \
+  --api-key-env DEEPSEEK_API_KEY \
+  --model deepseek-v4pro \
+  --plan-only
+```
+
 ## Run with OpenAI
 
 ```bash
@@ -102,10 +118,12 @@ The MVP is conda-first:
 3. create a task-specific conda env
 4. ask LLM for dependency setup commands needed for the experiment goal
 5. run setup commands with conda run -n <env>
-6. ask LLM for experiment/eval/demo commands that directly attempt the goal
-7. optionally confirm before running experiment commands
-8. run commands with conda run -n <env>
-9. write result.md and state.json
+6. ask LLM for safe probe commands such as --help/config inspection
+7. run probe commands and feed their logs back to the LLM
+8. ask LLM for the final experiment/eval/demo plan that directly attempts the goal
+9. optionally stop with --plan-only, or confirm before running experiment commands
+10. run commands with conda run -n <env>
+11. write result.md and state.json
 ```
 
 LLM commands should not contain `conda activate`, `conda create`, or `conda run`; `reproagent` wraps commands itself.

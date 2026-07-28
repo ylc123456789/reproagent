@@ -19,3 +19,4 @@ def test_task_default_experiment_goal_is_empty(tmp_path):
 
     assert task.experiment_goal == ""
     assert not task.confirm_before_experiment
+    assert not task.plan_only

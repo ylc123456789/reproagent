@@ -109,3 +109,13 @@ def test_run_one_timeout_writes_timeout_to_stderr(tmp_path, monkeypatch):
 
     assert result.exit_code == -1
     assert "Command timed out after 1s" in result.stderr_path.read_text(encoding="utf-8")
+
+
+def test_probe_allows_help_but_blocks_training():
+    ok, reason = is_safe_command("python examples/odenet_mnist.py --help", stage="probe")
+    assert ok
+    assert reason is None
+
+    ok, reason = is_safe_command("python examples/odenet_mnist.py", stage="probe")
+    assert not ok
+    assert "probe stage" in reason

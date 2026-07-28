@@ -66,3 +66,56 @@ def test_plan_experiment_includes_goal_in_prompt(tmp_path, monkeypatch):
     assert goal in captured["prompt"]
     assert "experiment goal" in captured["prompt"].lower()
     assert "Experiment profile" not in captured["prompt"]
+
+
+def test_plan_probe_asks_for_safe_interface_discovery(tmp_path, monkeypatch):
+    from reproagent import llm
+    from reproagent.models import RepoContext, ReproState, ReproTask
+
+    captured = {}
+
+    def fake_complete(state, prompt):
+        captured["prompt"] = prompt
+        return '{"stage":"probe","summary":"inspect","commands":["python train.py --help"],"assumptions":[],"feasibility":"ready_to_run"}'
+
+    task = ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path, experiment_goal="Run bounded training.")
+    state = ReproState(task=task, repo_context=RepoContext(repo_path=tmp_path))
+    monkeypatch.setattr(llm, "_openai_compatible_text", fake_complete)
+
+    plan = llm.plan_probe(state)
+
+    assert plan.stage == "probe"
+    assert "before any real training" in captured["prompt"]
+    assert "--help" in captured["prompt"]
+
+
+def test_plan_experiment_requires_goal_constraints_from_probe(tmp_path, monkeypatch):
+    from reproagent import llm
+    from reproagent.models import CommandPlan, CommandResult, RepoContext, ReproState, ReproTask, StageResult
+
+    captured = {}
+    probe_stdout = tmp_path / "probe.stdout"
+    probe_stdout.write_text("--nepochs NEPOCHS\n--gpu GPU\n", encoding="utf-8")
+    probe_stderr = tmp_path / "probe.stderr"
+    probe_stderr.write_text("", encoding="utf-8")
+
+    def fake_complete(state, prompt):
+        captured["prompt"] = prompt
+        return '{"stage":"experiment","summary":"run bounded","commands":["python examples/odenet_mnist.py --nepochs 1 --gpu 0"],"assumptions":[],"feasibility":"ready_to_run","expected_runtime":"minutes"}'
+
+    task = ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path, experiment_goal="Run bounded GPU MNIST.")
+    state = ReproState(task=task, repo_context=RepoContext(repo_path=tmp_path))
+    state.probe_attempts.append(StageResult(
+        stage="probe",
+        attempt=1,
+        plan=CommandPlan(stage="probe", summary="help", commands=["python examples/odenet_mnist.py --help"]),
+        results=[CommandResult(command="python examples/odenet_mnist.py --help", exit_code=0, stdout_path=probe_stdout, stderr_path=probe_stderr, duration_seconds=0.1)],
+    ))
+    monkeypatch.setattr(llm, "_openai_compatible_text", fake_complete)
+
+    plan = llm.plan_experiment(state)
+
+    assert "Do not assume default script parameters" in captured["prompt"]
+    assert "--nepochs NEPOCHS" in captured["prompt"]
+    assert "attention heads" in captured["prompt"]
+    assert plan.commands == ["python examples/odenet_mnist.py --nepochs 1 --gpu 0"]

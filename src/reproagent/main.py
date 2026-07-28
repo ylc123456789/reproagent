@@ -7,7 +7,7 @@ from pathlib import Path
 from .context import collect_context
 from .audit import audit_environment
 from .env import ensure_environment
-from .llm import final_review, plan_environment, plan_experiment, revise_after_failure
+from .llm import final_review, plan_environment, plan_experiment, plan_probe, revise_after_failure
 from .models import ReproState, ReproTask, StageResult
 from .report import save_state, write_result
 from .runner import run_commands
@@ -47,12 +47,23 @@ def run_task(task: ReproTask) -> ReproState:
     save_state(state)
 
     env_ok = _run_stage_loop(state, stage="environment", max_attempts=task.max_env_attempts)
-    exp_ok = _run_stage_loop(state, stage="experiment", max_attempts=task.max_run_attempts) if env_ok else False
+    probe_ok = _run_stage_loop(state, stage="probe", max_attempts=1) if env_ok else False
+    if env_ok and probe_ok and task.plan_only:
+        state.status = "planning_experiment"
+        _log("planning final experiment without running commands")
+        state.planned_experiment = plan_experiment(state)
+        _print_plan("experiment", 1, state.planned_experiment)
+        state.status = "planned"
+        state.final_summary = "Experiment plan generated with --plan-only. No experiment commands were executed."
+        write_result(state)
+        return state
+
+    exp_ok = _run_stage_loop(state, stage="experiment", max_attempts=task.max_run_attempts) if env_ok and probe_ok else False
 
     state.status = "reviewing"
     _log("writing final review")
     state.final_summary = final_review(state)
-    state.status = "completed" if env_ok and exp_ok else "completed_with_failures"
+    state.status = "completed" if env_ok and probe_ok and exp_ok else "completed_with_failures"
     write_result(state)
     return state
 
@@ -63,7 +74,12 @@ def _run_stage_loop(state: ReproState, stage: str, max_attempts: int) -> bool:
     for attempt in range(1, max_attempts + 1):
         _log(f"planning {stage} attempt {attempt}/{max_attempts}")
         if attempt == 1:
-            plan = plan_environment(state) if stage == "environment" else plan_experiment(state)
+            if stage == "environment":
+                plan = plan_environment(state)
+            elif stage == "probe":
+                plan = plan_probe(state)
+            else:
+                plan = plan_experiment(state)
         else:
             plan = revise_after_failure(state, stage=stage)
 
@@ -72,18 +88,22 @@ def _run_stage_loop(state: ReproState, stage: str, max_attempts: int) -> bool:
             _log("experiment cancelled by user before command execution")
             return False
 
-        results = run_commands(
-            plan.commands,
-            cwd=state.repo_context.repo_path,
-            workspace=state.task.workspace_dir,
-            stage=stage,
-            attempt=attempt,
-            timeout=state.task.timeout_seconds,
-            env_name=state.environment.env_name,
-        )
+        results = []
+        if plan.commands:
+            results = run_commands(
+                plan.commands,
+                cwd=state.repo_context.repo_path,
+                workspace=state.task.workspace_dir,
+                stage=stage,
+                attempt=attempt,
+                timeout=state.task.timeout_seconds,
+                env_name=state.environment.env_name,
+            )
         stage_result = StageResult(stage=stage, attempt=attempt, plan=plan, results=results)
         if stage == "environment":
             state.environment_attempts.append(stage_result)
+        elif stage == "probe":
+            state.probe_attempts.append(stage_result)
         else:
             state.experiment_attempts.append(stage_result)
         save_state(state)
@@ -106,6 +126,14 @@ def _run_stage_loop(state: ReproState, stage: str, max_attempts: int) -> bool:
 
 def _print_plan(stage: str, attempt: int, plan) -> None:
     _log(f"{stage} attempt {attempt} plan: {plan.summary or 'no summary'}")
+    if plan.feasibility:
+        _log(f"feasibility: {plan.feasibility}")
+    if plan.expected_runtime:
+        _log(f"expected runtime: {plan.expected_runtime}")
+    if plan.needs_user_input:
+        _log("needs user input:")
+        for item in plan.needs_user_input:
+            print(f"  - {item}", flush=True)
     if plan.assumptions:
         _log("assumptions:")
         for item in plan.assumptions:
@@ -146,6 +174,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--timeout", type=int, default=1800)
     run.add_argument("--experiment-goal", required=True, help="Concrete reproduction goal for this run")
     run.add_argument("--confirm-before-experiment", action="store_true", help="Print the experiment plan and wait for y/N before running experiment commands")
+    run.add_argument("--plan-only", action="store_true", help="Stop after probe and final experiment-plan generation; do not run experiment commands")
     return parser
 
 
@@ -167,6 +196,7 @@ def main(argv: list[str] | None = None) -> None:
             timeout_seconds=args.timeout,
             experiment_goal=args.experiment_goal,
             confirm_before_experiment=args.confirm_before_experiment,
+            plan_only=args.plan_only,
         )
         state = run_task(task)
         print(f"status: {state.status}")

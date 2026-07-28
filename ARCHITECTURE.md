@@ -21,7 +21,7 @@ state.json
 logs/
 ```
 
-The central goal is to let an LLM read repository context, paper reference, and the user-provided experiment goal, decide how a human would try to reproduce that target, execute the plan inside an isolated conda environment, and revise the plan after failures.
+The central goal is to let an LLM read repository context, paper reference, and the user-provided experiment goal, decide how a human would try to reproduce that target, probe the repository interface, produce a concrete execution plan, execute approved commands inside an isolated conda environment, and revise the plan after failures.
 
 ## 2. Project Path
 
@@ -52,7 +52,7 @@ src/reproagent/
   context.py   # clone repo and collect README/file evidence
   env.py       # conda environment creation and command wrapping
   llm.py       # LLM prompts and OpenAI-compatible API calls
-  runner.py    # command safety checks, execution, log capture
+  runner.py    # command safety checks, execution, live log streaming
   report.py    # write result.md and state.json
   main.py      # CLI and top-level workflow
 ```
@@ -84,9 +84,11 @@ Outer workflow is linear:
 1. Build Context
 2. Prepare Conda Environment
 3. Environment Loop
-4. Experiment Loop
-5. Result Review
-6. Write Report
+4. Probe Stage
+5. Final Experiment Planning
+6. Experiment Loop
+7. Result Review
+8. Write Report
 ```
 
 Each loop can retry locally. A failed environment command does not restart the whole run; it returns to the environment planner with the latest logs. A failed experiment command returns to the experiment planner with the latest logs.
@@ -97,9 +99,12 @@ Build Context
   -> Env plan by LLM for the experiment goal
   -> Run env commands inside conda env
   -> if failed: send logs back to LLM and retry env stage
-  -> Experiment plan by LLM for the experiment goal
+  -> Probe plan by LLM for safe interface discovery
+  -> Run only help/config/listing/inline-inspection probe commands
+  -> Final experiment plan by LLM for the experiment goal, using probe logs
+  -> if --plan-only: write planned experiment and stop before training/evaluation
   -> optionally ask user to confirm the experiment plan
-  -> Run experiment commands inside conda env
+  -> Run experiment commands inside conda env with live output streaming
   -> if failed: send logs back to LLM and retry experiment stage
   -> Result review
 ```
@@ -134,7 +139,7 @@ logs/*.stdout
 logs/*.stderr
 ```
 
-Within a stage, the system passes compact stage history and relevant tail logs back to the LLM.
+Within a stage, the system passes compact stage history and relevant tail logs back to the LLM. Probe logs are included before final experiment planning so the model can turn discovered CLI/config parameters into explicit commands instead of relying on script defaults.
 
 ## 8. Not Yet Doing
 
@@ -150,4 +155,4 @@ full blackboard architecture
 web UI
 ```
 
-The next milestone is: pass a concrete reproduction target, use a DeepSeek/OpenAI-compatible API to plan setup/run commands, execute them in conda, and produce an honest result file with metrics, deviations, and logs.
+The next milestone is: improve final-plan validation, especially checking that goal words such as bounded, GPU, loss, accuracy, or full reproduction are reflected in explicit commands/configs before expensive runs start.
