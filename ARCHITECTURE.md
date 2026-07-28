@@ -102,6 +102,8 @@ Build Context
   -> Probe plan by LLM for safe interface discovery
   -> Run only help/config/listing/inline-inspection probe commands
   -> Final experiment plan by LLM for the experiment goal, using probe logs
+  -> Validate final plan for obvious goal mismatches, unsupported metric claims, unsafe logging commands, and missing explicit budgets
+  -> if validation marks needs_patch/blocked/unsafe: write the issue and do not execute experiment commands
   -> if --plan-only: write planned experiment and stop before training/evaluation
   -> optionally ask user to confirm the experiment plan
   -> Run experiment commands inside conda env with live output streaming

@@ -50,3 +50,47 @@ def test_plan_only_runs_probe_and_does_not_run_experiment(tmp_path, monkeypatch)
     assert not state.experiment_attempts
     assert seen_stages == ["probe"]
     assert (task.workspace_dir / "result.md").exists()
+
+
+def test_experiment_validation_failure_stops_before_running_commands(tmp_path, monkeypatch):
+    from reproagent import main
+    from reproagent.models import CommandPlan, EnvironmentAudit, EnvironmentInfo, RepoContext, ReproTask
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(main, "collect_context", lambda task: RepoContext(repo_path=repo, file_tree="train.py", readme_text="demo"))
+    monkeypatch.setattr(main, "ensure_environment", lambda state: EnvironmentInfo(env_name="repro_test", created=True))
+    monkeypatch.setattr(main, "audit_environment", lambda state: EnvironmentAudit(success=True, summary="ok"))
+    monkeypatch.setattr(main, "plan_environment", lambda state: CommandPlan(stage="environment", summary="env", commands=[]))
+    monkeypatch.setattr(main, "plan_probe", lambda state: CommandPlan(stage="probe", summary="probe", commands=[]))
+    monkeypatch.setattr(
+        main,
+        "plan_experiment",
+        lambda state: CommandPlan(
+            stage="experiment",
+            summary="bad plan",
+            commands=["python train.py"],
+            assumptions=["The script likely prints training loss."],
+            feasibility="ready_to_run",
+        ),
+    )
+
+    def fake_run_commands(commands, cwd, workspace, stage, attempt, timeout, env_name):
+        if stage == "experiment":
+            raise AssertionError("validation failure must stop before experiment execution")
+        return []
+
+    monkeypatch.setattr(main, "run_commands", fake_run_commands)
+
+    state = main.run_task(ReproTask(
+        paper_url="paper",
+        repo_url="repo",
+        workspace_dir=tmp_path / "run",
+        mock_llm=True,
+        experiment_goal="Run a bounded GPU experiment and report training loss.",
+    ))
+
+    assert state.status == "completed_with_failures"
+    assert state.experiment_attempts
+    assert state.experiment_attempts[0].plan.feasibility == "needs_patch"
+    assert not state.experiment_attempts[0].results

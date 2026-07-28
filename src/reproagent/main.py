@@ -11,6 +11,7 @@ from .llm import final_review, plan_environment, plan_experiment, plan_probe, re
 from .models import ReproState, ReproTask, StageResult
 from .report import save_state, write_result
 from .runner import run_commands
+from .validation import validate_experiment_plan
 
 
 def _log(message: str) -> None:
@@ -51,7 +52,7 @@ def run_task(task: ReproTask) -> ReproState:
     if env_ok and probe_ok and task.plan_only:
         state.status = "planning_experiment"
         _log("planning final experiment without running commands")
-        state.planned_experiment = plan_experiment(state)
+        state.planned_experiment = _validated_experiment_plan(state)
         _print_plan("experiment", 1, state.planned_experiment)
         state.status = "planned"
         state.final_summary = "Experiment plan generated with --plan-only. No experiment commands were executed."
@@ -79,11 +80,16 @@ def _run_stage_loop(state: ReproState, stage: str, max_attempts: int) -> bool:
             elif stage == "probe":
                 plan = plan_probe(state)
             else:
-                plan = plan_experiment(state)
+                plan = _validated_experiment_plan(state)
         else:
             plan = revise_after_failure(state, stage=stage)
 
         _print_plan(stage, attempt, plan)
+        if stage == "experiment" and plan.feasibility and plan.feasibility != "ready_to_run":
+            _log(f"experiment not executed because plan feasibility is {plan.feasibility}")
+            state.experiment_attempts.append(StageResult(stage=stage, attempt=attempt, plan=plan, results=[]))
+            save_state(state)
+            return False
         if stage == "experiment" and state.task.confirm_before_experiment and not _confirm_experiment(plan):
             _log("experiment cancelled by user before command execution")
             return False
@@ -122,6 +128,15 @@ def _run_stage_loop(state: ReproState, stage: str, max_attempts: int) -> bool:
         if stage_result.success:
             return True
     return False
+
+
+def _validated_experiment_plan(state: ReproState):
+    plan = plan_experiment(state)
+    validated = validate_experiment_plan(state, plan)
+    if validated is not plan and validated.needs_user_input:
+        _log("plan validation flagged issues")
+    state.planned_experiment = validated
+    return validated
 
 
 def _print_plan(stage: str, attempt: int, plan) -> None:
