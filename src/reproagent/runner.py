@@ -26,6 +26,10 @@ def is_safe_command(command: str, stage: str | None = None) -> tuple[bool, str |
     return True, None
 
 
+def _normalize_command(command: str) -> str:
+    return command.replace(".**version**", ".__version__")
+
+
 def _is_probe_command(command: str) -> bool:
     lowered = command.strip().lower()
     if "--help" in lowered or lowered.endswith(" -h") or " -h " in lowered:
@@ -47,7 +51,7 @@ def run_commands(commands: list[str], cwd: Path, workspace: Path, stage: str, at
         if not ok:
             results.append(_write_blocked_result(command, workspace, stage, attempt, index, reason or "blocked"))
             continue
-        results.append(_run_one(command, cwd, workspace, stage, attempt, index, timeout, env_name))
+        results.append(_run_one(_normalize_command(command), cwd, workspace, stage, attempt, index, timeout, env_name))
     return results
 
 
@@ -63,6 +67,8 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
     start = time.monotonic()
     stdout_chunks: list[str] = []
     stderr_chunks: list[str] = []
+    stdout_path.write_text("", encoding="utf-8")
+    stderr_path.write_text("", encoding="utf-8")
     code = -1
     process: subprocess.Popen[str] | None = None
     try:
@@ -75,15 +81,16 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
             bufsize=1,
             env=_command_env(workspace),
         )
-        threads = [
-            threading.Thread(target=_stream_pipe, args=(process.stdout, sys.stdout, stdout_chunks, stage), daemon=True),
-            threading.Thread(target=_stream_pipe, args=(process.stderr, sys.stderr, stderr_chunks, stage), daemon=True),
-        ]
-        for thread in threads:
-            thread.start()
-        code = process.wait(timeout=timeout)
-        for thread in threads:
-            thread.join(timeout=1)
+        with stdout_path.open("a", encoding="utf-8", errors="replace") as stdout_file, stderr_path.open("a", encoding="utf-8", errors="replace") as stderr_file:
+            threads = [
+                threading.Thread(target=_stream_pipe, args=(process.stdout, sys.stdout, stdout_file, stdout_chunks, stage), daemon=True),
+                threading.Thread(target=_stream_pipe, args=(process.stderr, sys.stderr, stderr_file, stderr_chunks, stage), daemon=True),
+            ]
+            for thread in threads:
+                thread.start()
+            code = process.wait(timeout=timeout)
+            for thread in threads:
+                thread.join(timeout=1)
     except subprocess.TimeoutExpired:
         if process is not None:
             process.kill()
@@ -92,21 +99,24 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
                     stream.close()
         message = f"Command timed out after {timeout}s\n"
         stderr_chunks.append(message)
+        with stderr_path.open("a", encoding="utf-8", errors="replace") as stderr_file:
+            stderr_file.write(message)
+            stderr_file.flush()
         print(message, file=sys.stderr, end="", flush=True)
         code = -1
     duration = round(time.monotonic() - start, 2)
-    stdout_path.write_text("".join(stdout_chunks), encoding="utf-8", errors="replace")
-    stderr_path.write_text("".join(stderr_chunks), encoding="utf-8", errors="replace")
     print(f"[reproagent] finished {stage} command {attempt}.{index}: exit={code}, duration={duration}s", flush=True)
     return CommandResult(command=command, exit_code=code, stdout_path=stdout_path, stderr_path=stderr_path, duration_seconds=duration, backend_command=backend_command)
 
 
-def _stream_pipe(pipe, display, chunks: list[str], stage: str) -> None:
+def _stream_pipe(pipe, display, log_file, chunks: list[str], stage: str) -> None:
     if pipe is None:
         return
     try:
         for line in pipe:
             chunks.append(line)
+            log_file.write(line)
+            log_file.flush()
             if _should_display_line(stage, line):
                 print(line, file=display, end="", flush=True)
     finally:

@@ -138,3 +138,37 @@ def test_probe_allows_help_but_blocks_training():
     ok, reason = is_safe_command("python examples/odenet_mnist.py", stage="probe")
     assert not ok
     assert "probe stage" in reason
+
+
+def test_run_one_creates_logs_before_process_exits(tmp_path, monkeypatch):
+    import time
+    from reproagent import runner
+
+    monkeypatch.setattr(runner, "find_conda", lambda: None)
+    monkeypatch.setattr(
+        runner,
+        "build_backend_command",
+        lambda env_name, command, conda=None: [
+            "python",
+            "-c",
+            "import time; print('line before sleep', flush=True); time.sleep(1)",
+        ],
+    )
+
+    result_holder = {}
+    thread = runner.threading.Thread(
+        target=lambda: result_holder.setdefault("result", runner._run_one("ignored", tmp_path, tmp_path, "environment", 1, 1, 10, "env"))
+    )
+    thread.start()
+
+    stdout_path = tmp_path / "logs" / "environment_01_01.stdout"
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        if stdout_path.exists() and "line before sleep" in stdout_path.read_text(encoding="utf-8"):
+            break
+        time.sleep(0.05)
+
+    assert stdout_path.exists()
+    assert "line before sleep" in stdout_path.read_text(encoding="utf-8")
+    thread.join(timeout=5)
+    assert result_holder["result"].exit_code == 0
