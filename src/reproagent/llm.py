@@ -6,7 +6,7 @@ import os
 import urllib.request
 
 from .models import CommandPlan, ReproState
-from .text import normalize_plan_text, normalize_text_list
+from .text import normalize_plan_text, normalize_text, normalize_text_list
 
 FEASIBILITIES = {"ready_to_run", "needs_config", "needs_patch", "blocked", "unsafe_or_too_expensive"}
 
