@@ -87,7 +87,7 @@ def final_review(state: ReproState) -> str:
 
 Write a concise reproduction result summary. Explain the experiment goal, what worked, what failed, whether the goal was achieved or only partially achieved, what metrics were found, whether the run used GPU or CPU fallback, and what human input is needed next. Return plain Markdown.
 """
-    return _openai_compatible_text(state, prompt)
+    return normalize_text(_openai_compatible_text(state, prompt))
 
 
 def _complete_plan(state: ReproState, prompt: str, stage: str) -> CommandPlan:

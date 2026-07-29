@@ -139,3 +139,21 @@ def test_complete_plan_drops_false_needs_user_input(tmp_path, monkeypatch):
     plan = llm.plan_experiment(state)
 
     assert plan.needs_user_input == []
+
+
+def test_final_review_normalizes_llm_text(tmp_path, monkeypatch):
+    from reproagent import llm
+    from reproagent.models import RepoContext, ReproState, ReproTask
+
+    def fake_complete(state, prompt):
+        return "paperâ€™s GPU鈥慳ccelerated result"
+
+    state = ReproState(
+        task=ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path),
+        repo_context=RepoContext(repo_path=tmp_path),
+    )
+    monkeypatch.setattr(llm, "_openai_compatible_text", fake_complete)
+
+    summary = llm.final_review(state)
+
+    assert summary == "paper's GPU-accelerated result"

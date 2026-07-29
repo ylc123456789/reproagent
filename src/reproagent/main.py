@@ -12,6 +12,7 @@ from .llm import final_review, plan_environment, plan_experiment, plan_probe, re
 from .models import ReproState, ReproTask, StageResult
 from .report import save_state, write_result
 from .runner import run_commands
+from .text import normalize_text
 from .validation import validate_experiment_plan
 
 
@@ -64,10 +65,52 @@ def run_task(task: ReproTask) -> ReproState:
 
     state.status = "reviewing"
     _log("writing final review")
-    state.final_summary = final_review(state)
+    state.final_summary = _final_summary(state)
     state.status = "completed" if env_ok and probe_ok and exp_ok else "completed_with_failures"
     write_result(state)
     return state
+
+
+def _final_summary(state: ReproState) -> str:
+    blocked_result = _blocking_coding_agent_result(state)
+    if blocked_result is not None:
+        lines = [
+            "Experiment commands were not executed because CodingAgent did not complete the required patch.",
+            "",
+            f"CodingAgent status: {blocked_result.status}",
+        ]
+        if state.planned_experiment:
+            lines += [
+                f"Experiment feasibility: {state.planned_experiment.feasibility or 'unknown'}",
+                f"Experiment plan: {state.planned_experiment.summary}",
+            ]
+            if state.planned_experiment.needs_user_input:
+                lines += ["Required decision or fix:"]
+                lines += [f"- {item}" for item in state.planned_experiment.needs_user_input]
+        if blocked_result.summary:
+            lines += ["", f"CodingAgent summary: {blocked_result.summary}"]
+        if blocked_result.report_path:
+            lines += [f"CodingAgent report: {blocked_result.report_path}"]
+        if blocked_result.diff_path:
+            lines += [f"CodingAgent diff: {blocked_result.diff_path}"]
+        if blocked_result.output_dir:
+            lines += [f"CodingAgent output dir: {blocked_result.output_dir}"]
+        lines += [
+            "",
+            "Next step: fix the CodingAgent patch/apply failure or update the required repo-local patch, then rerun reproagent.",
+        ]
+        return normalize_text("\n".join(lines))
+    return normalize_text(final_review(state))
+
+
+def _blocking_coding_agent_result(state: ReproState):
+    if not state.coding_agent_results:
+        return None
+    latest = state.coding_agent_results[-1]
+    experiment_commands_ran = any(attempt.results for attempt in state.experiment_attempts)
+    if latest.status != "completed" and not experiment_commands_ran:
+        return latest
+    return None
 
 
 def _run_stage_loop(state: ReproState, stage: str, max_attempts: int) -> bool:
