@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from coding_agent import CodeTaskSpec, run_code_task
 
+from .env import find_conda
+
 from .models import CodingAgentResult, CommandPlan, ReproState
 
 
@@ -22,6 +24,7 @@ def run_coding_agent_for_patch(state: ReproState, plan: CommandPlan) -> CodingAg
         api_key_env=state.task.api_key_env,
         model=state.task.model or "gpt-4.1",
         output_dir=output_dir,
+        command_prefix=[str(find_conda()), "run", "-n", state.environment.env_name, "bash", "-c"] if state.environment else [],
     ))
     return CodingAgentResult(
         status=report.status,
@@ -64,6 +67,8 @@ def _constraints() -> list[str]:
         "Keep patches minimal and easy to review.",
         "Do not write outside the repository worktree.",
         "Do not remove files, datasets, checkpoints, or caches.",
+        "Do not install or upgrade dependencies; reproagent has already prepared the conda environment.",
+        "Use the provided verification commands and existing environment instead of running pip/conda/apt installs.",
     ]
 
 

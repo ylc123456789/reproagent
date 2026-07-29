@@ -76,6 +76,10 @@ def validate_command(command: str) -> None:
         "reboot",
         "curl",
         "wget",
+        "pip install",
+        "conda install",
+        "apt install",
+        "apt-get install",
     ]
     if any(fragment in lowered for fragment in blocked_fragments):
         if ("curl" in lowered or "wget" in lowered) and "| bash" not in lowered and "| sh" not in lowered:
