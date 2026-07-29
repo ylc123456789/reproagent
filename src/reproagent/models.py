@@ -97,6 +97,7 @@ class CodingAgentResult(BaseModel):
     diff_path: Path | None = None
     report_path: Path | None = None
     output_dir: Path | None = None
+    environment_summary: str = ""
     verification_commands: list[str] = Field(default_factory=list)
     residual_risks: list[str] = Field(default_factory=list)
 

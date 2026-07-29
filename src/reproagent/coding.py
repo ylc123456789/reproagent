@@ -14,11 +14,12 @@ def run_coding_agent_for_patch(state: ReproState, plan: CommandPlan) -> CodingAg
     if state.repo_context is None:
         raise RuntimeError("repo context is required before running CodingAgent")
     output_dir = state.task.workspace_dir / "patches" / f"coding_agent_{len(state.coding_agent_results) + 1:02d}"
+    env_summary = _environment_summary(state)
     verify_commands = _verification_commands(state, plan)
     report = run_code_task(CodeTaskSpec(
         repo_path=state.repo_context.repo_path,
-        task_goal=_task_goal(state, plan),
-        constraints=_constraints(),
+        task_goal=_task_goal(state, plan, env_summary),
+        constraints=_constraints(env_summary),
         verify_commands=verify_commands,
         max_steps=state.task.max_coding_agent_steps,
         timeout_seconds=state.task.timeout_seconds,
@@ -34,12 +35,13 @@ def run_coding_agent_for_patch(state: ReproState, plan: CommandPlan) -> CodingAg
         diff_path=report.diff_path,
         report_path=output_dir / "patch_report.md",
         output_dir=output_dir,
+        environment_summary=env_summary,
         verification_commands=[result.command for result in report.verification_results] or verify_commands,
         residual_risks=report.residual_risks,
     )
 
 
-def _task_goal(state: ReproState, plan: CommandPlan) -> str:
+def _task_goal(state: ReproState, plan: CommandPlan, env_summary: str) -> str:
     issues = "\n".join(f"- {item}" for item in plan.needs_user_input)
     commands = "\n".join(f"- {command}" for command in plan.commands)
     return f"""Modify the repository minimally so the experiment goal can be attempted without changing research semantics.
@@ -56,11 +58,16 @@ Validation issues to resolve:
 Planned experiment commands before patch:
 {commands or '- none'}
 
+Execution environment:
+{env_summary}
+
+Your verification commands are already wrapped by reproagent to run inside that environment. If an import, dependency, CUDA, or package-version error appears, report it as an environment issue for reproagent instead of installing packages.
+
 Prefer the smallest code/config change that resolves the validation issues. If a requested metric is not logged, add logging rather than changing training behavior. If the goal is bounded and the repo lacks suitable controls, add a minimal CLI/config control instead of editing default full-experiment behavior.
 """
 
 
-def _constraints() -> list[str]:
+def _constraints(env_summary: str) -> list[str]:
     return [
         "Do not change model architecture unless explicitly required by the task.",
         "Do not change optimizer, loss function, dataset split, or evaluation metric unless explicitly required by the task.",
@@ -70,8 +77,23 @@ def _constraints() -> list[str]:
         "Do not remove files, datasets, checkpoints, or caches.",
         "Do not install or upgrade dependencies; reproagent has already prepared the conda environment.",
         "Use the provided verification commands and existing environment instead of running pip/conda/apt installs.",
+        "Environment context: " + env_summary.replace(chr(10), " / "),
     ]
 
+def _environment_summary(state: ReproState) -> str:
+    if state.environment is None:
+        return "No reproagent-managed environment is available; use only repo-local inspection and report environment blockers."
+    audit_details = ""
+    if state.environment_audit and state.environment_audit.details:
+        audit_details = chr(10) + "- Audit details: " + " / ".join(state.environment_audit.details)
+    return (
+        f"- reproagent has already prepared the conda environment {state.environment.env_name!r} for this repository.\n"
+        f"- Environment backend: {state.environment.backend}. Created this run: {state.environment.created}.\n"
+        f"- Verification commands are executed via conda run -n {state.environment.env_name} bash -c <command>.\n"
+        "- Do not install, upgrade, or remove dependencies from CodingAgent. Dependency/environment repair belongs to reproagent environment stage.\n"
+        "- Your responsibility is repo-local code/config edits and verification inside the prepared environment."
+        f"{audit_details}"
+    )
 
 def _verification_commands(state: ReproState, plan: CommandPlan) -> list[str]:
     commands: list[str] = []

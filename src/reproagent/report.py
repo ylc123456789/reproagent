@@ -114,6 +114,8 @@ def _coding_agent_lines(results) -> list[str]:
         lines += ["### Run " + str(index), "", "Status: " + result.status, "", result.summary or "No summary.", ""]
         if result.changed_files:
             lines += ["Changed files:"] + ["- " + path for path in result.changed_files] + [""]
+        if result.environment_summary:
+            lines += ["Environment:", result.environment_summary, ""]
         if result.diff_path:
             lines += ["- Diff: " + str(result.diff_path)]
         if result.report_path:
