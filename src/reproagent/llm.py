@@ -211,7 +211,7 @@ def _mock_plan(stage: str) -> CommandPlan:
     if stage == "environment":
         return CommandPlan(stage="environment", summary="Mock environment: no setup commands.", commands=[])
     if stage == "probe":
-        return CommandPlan(stage="probe", summary="Mock probe: inspect Python entry points.", commands=["python3 --version"], feasibility="ready_to_run")
+        return CommandPlan(stage="probe", summary="Mock probe: inspect Python entry points.", commands=["python3 -c \"import sys; print(sys.version)\""], feasibility="ready_to_run")
     return CommandPlan(stage="experiment", summary="Mock experiment: inspect Python entry points.", commands=["python3 --version"], feasibility="ready_to_run", expected_runtime="seconds")
 
 

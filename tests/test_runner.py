@@ -172,3 +172,9 @@ def test_run_one_creates_logs_before_process_exits(tmp_path, monkeypatch):
     assert "line before sleep" in stdout_path.read_text(encoding="utf-8")
     thread.join(timeout=5)
     assert result_holder["result"].exit_code == 0
+
+
+def test_probe_allows_python_inline_check():
+    ok, reason = is_safe_command('python3 -c "import sys; print(sys.version)"', stage="probe")
+    assert ok
+    assert reason is None
