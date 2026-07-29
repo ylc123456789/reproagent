@@ -28,8 +28,8 @@ def validate_experiment_plan(state: ReproState, plan: CommandPlan) -> CommandPla
     ):
         issues.append("Goal asks for a bounded run, but the final commands do not set an explicit training budget such as epochs/steps.")
 
-    if "gpu" in goal and not _mentions_any(command_text + "\n" + probe_text, ("--gpu", "cuda", "device", "torch.cuda")):
-        issues.append("Goal asks for GPU execution, but the final plan has no GPU flag or GPU evidence.")
+    if "gpu" in goal and not _has_gpu_execution_evidence(command_text, plan_text, probe_text):
+        issues.append("Goal asks for GPU execution, but the final plan does not show command-level GPU use or probe evidence that the entry point defaults to CUDA/GPU.")
 
     if "loss" in goal and _loss_logging_is_uncertain(probe_text):
         issues.append("Goal asks for training loss, but probe evidence does not show that the unmodified script prints/logs loss; mark this as needs_patch or explicitly report the metric as unavailable.")
@@ -52,6 +52,15 @@ def validate_experiment_plan(state: ReproState, plan: CommandPlan) -> CommandPla
         "stop_reason": f"{stop_reason}\n{validation_reason}".strip(),
     })
 
+
+
+def _has_gpu_execution_evidence(command_text: str, plan_text: str, probe_text: str) -> bool:
+    evidence = "\n".join([command_text, plan_text, probe_text])
+    if _mentions_any(evidence, ("--gpu", "--device", "cuda", "torch.cuda", "device = torch.device", "cuda:", "gpu gpu")):
+        return True
+    if "default=0" in evidence and "gpu" in evidence and "torch.cuda.is_available" in evidence:
+        return True
+    return False
 
 def _probe_text(state: ReproState) -> str:
     chunks: list[str] = []

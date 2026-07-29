@@ -28,7 +28,7 @@ def test_clean_text_repairs_latin1_utf8_mojibake():
 
     cleaned = _clean_text(text)
 
-    assert cleaned == "paper’s GPU–accelerated run"
+    assert cleaned == "paper's GPU-accelerated run"
 
 
 def test_write_result_includes_experiment_goal(tmp_path):

@@ -75,3 +75,28 @@ def test_validation_flags_shell_logging_and_missing_budget(tmp_path):
     assert validated.feasibility == "blocked"
     assert any("bounded" in issue for issue in validated.needs_user_input)
     assert any("tee" in issue for issue in validated.needs_user_input)
+
+
+def test_validation_accepts_gpu_default_probe_evidence(tmp_path):
+    from reproagent.models import CommandPlan, CommandResult, RepoContext, ReproState, ReproTask, StageResult
+    from reproagent.validation import validate_experiment_plan
+
+    probe_stdout = tmp_path / "probe.stdout"
+    probe_stdout.write_text("--gpu GPU\nparser.add_argument('--gpu', type=int, default=0)\ndevice = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')", encoding="utf-8")
+    probe_stderr = tmp_path / "probe.stderr"
+    probe_stderr.write_text("", encoding="utf-8")
+    state = ReproState(
+        task=ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path, experiment_goal="Run bounded GPU MNIST."),
+        repo_context=RepoContext(repo_path=tmp_path),
+    )
+    state.probe_attempts.append(StageResult(
+        stage="probe",
+        attempt=1,
+        plan=CommandPlan(stage="probe", summary="inspect GPU defaults", commands=[]),
+        results=[CommandResult(command="grep gpu", exit_code=0, stdout_path=probe_stdout, stderr_path=probe_stderr, duration_seconds=0.1)],
+    ))
+    plan = CommandPlan(stage="experiment", summary="run bounded", commands=["python examples/odenet_mnist.py --nepochs 1"], feasibility="ready_to_run")
+
+    validated = validate_experiment_plan(state, plan)
+
+    assert not any("GPU execution" in item for item in validated.needs_user_input)

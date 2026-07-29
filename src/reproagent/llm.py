@@ -6,6 +6,7 @@ import os
 import urllib.request
 
 from .models import CommandPlan, ReproState
+from .text import normalize_plan_text, normalize_text_list
 
 FEASIBILITIES = {"ready_to_run", "needs_config", "needs_patch", "blocked", "unsafe_or_too_expensive"}
 
@@ -105,13 +106,13 @@ def _complete_plan(state: ReproState, prompt: str, stage: str) -> CommandPlan:
         feasibility = None
     return CommandPlan(
         stage=returned_stage,
-        summary=str(data.get("summary", "")),
-        commands=_as_list(data.get("commands", [])),
-        assumptions=_as_list(data.get("assumptions", [])),
+        summary=normalize_text(str(data.get("summary", ""))),
+        commands=normalize_text_list(_as_list(data.get("commands", []))),
+        assumptions=normalize_text_list(_as_list(data.get("assumptions", []))),
         feasibility=feasibility,
-        expected_runtime=data.get("expected_runtime"),
-        needs_user_input=_as_list(data.get("needs_user_input", []), drop_false=True),
-        stop_reason=data.get("stop_reason"),
+        expected_runtime=normalize_plan_text(data.get("expected_runtime")),
+        needs_user_input=normalize_text_list(_as_list(data.get("needs_user_input", []), drop_false=True)),
+        stop_reason=normalize_plan_text(data.get("stop_reason")),
     )
 
 
