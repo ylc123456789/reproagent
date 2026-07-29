@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,7 +22,6 @@ class CodeTaskSpec(BaseModel):
     api_key_env: str = "OPENAI_API_KEY"
     model: str = "gpt-4.1"
     output_dir: Path | None = None
-    command_prefix: list[str] = Field(default_factory=list)
 
     @field_validator("repo_path")
     @classmethod

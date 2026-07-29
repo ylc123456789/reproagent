@@ -1,6 +1,8 @@
 """Adapter for the vendored generic coding_agent package."""
 from __future__ import annotations
 
+import shlex
+
 from coding_agent import CodeTaskSpec, run_code_task
 
 from .env import find_conda
@@ -24,7 +26,6 @@ def run_coding_agent_for_patch(state: ReproState, plan: CommandPlan) -> CodingAg
         api_key_env=state.task.api_key_env,
         model=state.task.model or "gpt-4.1",
         output_dir=output_dir,
-        command_prefix=[str(find_conda()), "run", "-n", state.environment.env_name, "bash", "-c"] if state.environment else [],
     ))
     return CodingAgentResult(
         status=report.status,
@@ -83,4 +84,20 @@ def _verification_commands(state: ReproState, plan: CommandPlan) -> list[str]:
         lowered = command.lower()
         if ("--debug" in lowered or "--help" in lowered) and command not in commands:
             commands.append(command)
-    return commands[:3]
+    commands = commands[:3]
+    if state.environment is None:
+        return commands
+    return [_wrap_verify_command(command, state.environment.env_name) for command in commands]
+
+
+def _wrap_verify_command(command: str, env_name: str) -> str:
+    conda = str(find_conda())
+    return " ".join([
+        shlex.quote(conda),
+        "run",
+        "-n",
+        shlex.quote(env_name),
+        "bash",
+        "-c",
+        shlex.quote(command),
+    ])

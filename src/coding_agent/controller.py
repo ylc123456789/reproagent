@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -156,7 +156,7 @@ def execute_action(spec: CodeTaskSpec, action: ControllerAction, output_dir: Pat
         command = action.command or (spec.verify_commands[0] if spec.verify_commands else None)
         if not command:
             raise ValueError("run_command requires command")
-        results = run_verify_commands(spec.repo_path, [command], output_dir / "logs" / f"step_{step:02d}", spec.timeout_seconds, spec.command_prefix)
+        results = run_verify_commands(spec.repo_path, [command], output_dir / "logs" / f"step_{step:02d}", spec.timeout_seconds)
         result = results[0]
         stdout_tail = result.stdout_path.read_text(encoding="utf-8", errors="ignore")[-4000:]
         stderr_tail = result.stderr_path.read_text(encoding="utf-8", errors="ignore")[-4000:]

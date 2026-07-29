@@ -13,7 +13,6 @@ def run_verify_commands(
     commands: list[str],
     log_dir: Path,
     timeout_seconds: int,
-    command_prefix: list[str] | None = None,
 ) -> list[CommandResult]:
     log_dir.mkdir(parents=True, exist_ok=True)
     results: list[CommandResult] = []
@@ -25,9 +24,9 @@ def run_verify_commands(
         timed_out = False
         try:
             completed = subprocess.run(
-                [*(command_prefix or []), command] if command_prefix else command,
+                command,
                 cwd=repo_root,
-                shell=not command_prefix,
+                shell=True,
                 text=True,
                 capture_output=True,
                 timeout=timeout_seconds,
