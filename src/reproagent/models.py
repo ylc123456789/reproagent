@@ -30,6 +30,8 @@ class ReproTask(BaseModel):
     experiment_goal: str = ""
     confirm_before_experiment: bool = False
     plan_only: bool = False
+    enable_coding_agent: bool = False
+    max_coding_agent_steps: int = 12
 
 class RepoContext(BaseModel):
     repo_path: Path
@@ -88,6 +90,17 @@ class StageResult(BaseModel):
     def success(self) -> bool:
         return bool(self.results) and all(r.success for r in self.results)
 
+class CodingAgentResult(BaseModel):
+    status: str
+    summary: str = ""
+    changed_files: list[str] = Field(default_factory=list)
+    diff_path: Path | None = None
+    report_path: Path | None = None
+    output_dir: Path | None = None
+    verification_commands: list[str] = Field(default_factory=list)
+    residual_risks: list[str] = Field(default_factory=list)
+
+
 class ReproState(BaseModel):
     task: ReproTask
     status: str = "created"
@@ -97,6 +110,7 @@ class ReproState(BaseModel):
     environment_attempts: list[StageResult] = Field(default_factory=list)
     probe_attempts: list[StageResult] = Field(default_factory=list)
     planned_experiment: CommandPlan | None = None
+    coding_agent_results: list[CodingAgentResult] = Field(default_factory=list)
     experiment_attempts: list[StageResult] = Field(default_factory=list)
     final_summary: str = ""
     result_path: Path | None = None

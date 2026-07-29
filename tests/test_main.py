@@ -41,3 +41,19 @@ def test_run_parser_reads_plan_only(tmp_path):
     ])
 
     assert args.plan_only
+
+
+def test_run_parser_reads_coding_agent_options(tmp_path):
+    parser = build_parser()
+    args = parser.parse_args([
+        "run",
+        "--paper", "paper",
+        "--repo", "repo",
+        "--workspace", str(tmp_path),
+        "--experiment-goal", "Run MNIST and report accuracy.",
+        "--enable-coding-agent",
+        "--max-coding-agent-steps", "5",
+    ])
+
+    assert args.enable_coding_agent
+    assert args.max_coding_agent_steps == 5

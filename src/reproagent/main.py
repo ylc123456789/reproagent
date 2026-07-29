@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 
 from .context import collect_context
+from .coding import run_coding_agent_for_patch
 from .audit import audit_environment
 from .env import ensure_environment
 from .llm import final_review, plan_environment, plan_experiment, plan_probe, revise_after_failure
@@ -86,10 +87,24 @@ def _run_stage_loop(state: ReproState, stage: str, max_attempts: int) -> bool:
 
         _print_plan(stage, attempt, plan)
         if stage == "experiment" and plan.feasibility and plan.feasibility != "ready_to_run":
-            _log(f"experiment not executed because plan feasibility is {plan.feasibility}")
-            state.experiment_attempts.append(StageResult(stage=stage, attempt=attempt, plan=plan, results=[]))
-            save_state(state)
-            return False
+            if plan.feasibility == "needs_patch" and state.task.enable_coding_agent and not state.task.plan_only:
+                if _run_coding_agent_patch_cycle(state, plan):
+                    plan = _validated_experiment_plan(state)
+                    _print_plan(stage, attempt, plan)
+                    if plan.feasibility and plan.feasibility != "ready_to_run":
+                        _log(f"experiment not executed because plan feasibility is {plan.feasibility}")
+                        state.experiment_attempts.append(StageResult(stage=stage, attempt=attempt, plan=plan, results=[]))
+                        save_state(state)
+                        return False
+                else:
+                    state.experiment_attempts.append(StageResult(stage=stage, attempt=attempt, plan=plan, results=[]))
+                    save_state(state)
+                    return False
+            else:
+                _log(f"experiment not executed because plan feasibility is {plan.feasibility}")
+                state.experiment_attempts.append(StageResult(stage=stage, attempt=attempt, plan=plan, results=[]))
+                save_state(state)
+                return False
         if stage == "experiment" and state.task.confirm_before_experiment and not _confirm_experiment(plan):
             _log("experiment cancelled by user before command execution")
             return False
@@ -137,6 +152,47 @@ def _validated_experiment_plan(state: ReproState):
         _log("plan validation flagged issues")
     state.planned_experiment = validated
     return validated
+
+
+def _run_coding_agent_patch_cycle(state: ReproState, plan) -> bool:
+    _log("running CodingAgent to resolve patch-required validation issues")
+    try:
+        result = run_coding_agent_for_patch(state, plan)
+    except Exception as exc:
+        _log(f"CodingAgent failed: {exc}")
+        return False
+    state.coding_agent_results.append(result)
+    save_state(state)
+    _log(f"CodingAgent status: {result.status}")
+    if result.report_path:
+        _log(f"CodingAgent report: {result.report_path}")
+    if result.status != "completed":
+        return False
+    _log("rerunning probe after CodingAgent patch")
+    return _run_probe_once_after_patch(state)
+
+
+def _run_probe_once_after_patch(state: ReproState) -> bool:
+    assert state.repo_context is not None
+    assert state.environment is not None
+    attempt = len(state.probe_attempts) + 1
+    plan = plan_probe(state)
+    _print_plan("probe", attempt, plan)
+    results = []
+    if plan.commands:
+        results = run_commands(
+            plan.commands,
+            cwd=state.repo_context.repo_path,
+            workspace=state.task.workspace_dir,
+            stage="probe",
+            attempt=attempt,
+            timeout=state.task.timeout_seconds,
+            env_name=state.environment.env_name,
+        )
+    stage_result = StageResult(stage="probe", attempt=attempt, plan=plan, results=results)
+    state.probe_attempts.append(stage_result)
+    save_state(state)
+    return not plan.commands or stage_result.success
 
 
 def _print_plan(stage: str, attempt: int, plan) -> None:
@@ -190,6 +246,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--experiment-goal", required=True, help="Concrete reproduction goal for this run")
     run.add_argument("--confirm-before-experiment", action="store_true", help="Print the experiment plan and wait for y/N before running experiment commands")
     run.add_argument("--plan-only", action="store_true", help="Stop after probe and final experiment-plan generation; do not run experiment commands")
+    run.add_argument("--enable-coding-agent", action="store_true", help="Allow CodingAgent to patch the cloned repository when validation reports needs_patch")
+    run.add_argument("--max-coding-agent-steps", type=int, default=12, help="Maximum CodingAgent controller steps per patch attempt")
     return parser
 
 
@@ -212,6 +270,8 @@ def main(argv: list[str] | None = None) -> None:
             experiment_goal=args.experiment_goal,
             confirm_before_experiment=args.confirm_before_experiment,
             plan_only=args.plan_only,
+            enable_coding_agent=args.enable_coding_agent,
+            max_coding_agent_steps=args.max_coding_agent_steps,
         )
         state = run_task(task)
         print(f"status: {state.status}")

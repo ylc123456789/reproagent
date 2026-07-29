@@ -68,6 +68,7 @@ def write_result(state: ReproState):
     lines += _stage_lines("Probe Attempts", state.probe_attempts)
     if state.planned_experiment:
         lines += _planned_experiment_lines(state.planned_experiment)
+    lines += _coding_agent_lines(state.coding_agent_results)
     lines += _stage_lines("Experiment Attempts", state.experiment_attempts)
     lines += ["## Final Summary", "", state.final_summary or "No final summary.", ""]
     path.write_text(_clean_text("\n".join(lines)), encoding="utf-8")
@@ -103,6 +104,28 @@ def _stage_lines(title: str, attempts) -> list[str]:
         lines.append("")
     return lines
 
+
+
+def _coding_agent_lines(results) -> list[str]:
+    lines = ["## Coding Agent", ""]
+    if not results:
+        return lines + ["No coding agent runs recorded.", ""]
+    for index, result in enumerate(results, start=1):
+        lines += ["### Run " + str(index), "", "Status: " + result.status, "", result.summary or "No summary.", ""]
+        if result.changed_files:
+            lines += ["Changed files:"] + ["- " + path for path in result.changed_files] + [""]
+        if result.diff_path:
+            lines += ["- Diff: " + str(result.diff_path)]
+        if result.report_path:
+            lines += ["- Report: " + str(result.report_path)]
+        if result.output_dir:
+            lines += ["- Output dir: " + str(result.output_dir)]
+        if result.verification_commands:
+            lines += ["", "Verification commands:"] + ["- " + command for command in result.verification_commands]
+        if result.residual_risks:
+            lines += ["", "Residual risks:"] + ["- " + risk for risk in result.residual_risks]
+        lines.append("")
+    return lines
 
 
 def _planned_experiment_lines(plan) -> list[str]:
