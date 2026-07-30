@@ -100,3 +100,33 @@ def test_validation_accepts_gpu_default_probe_evidence(tmp_path):
     validated = validate_experiment_plan(state, plan)
 
     assert not any("GPU execution" in item for item in validated.needs_user_input)
+
+
+
+def test_validation_accepts_loss_logging_from_completed_coding_agent_patch(tmp_path):
+    from reproagent.models import CodingAgentResult
+
+    diff = tmp_path / "diff.patch"
+    diff.write_text("+ logger.info('Loss %.4f | Test Acc %.4f', loss_meter.avg, val_acc)\n", encoding="utf-8")
+    state = _state_with_probe(
+        tmp_path,
+        "Run a bounded GPU experiment and report training loss.",
+        "--nepochs NEPOCHS\n--gpu GPU\ncriterion = nn.CrossEntropyLoss()\nlogger.info('Train Acc ... Test Acc ...')\n",
+    )
+    state.coding_agent_results.append(CodingAgentResult(
+        status="completed",
+        summary="Added training loss logging per epoch.",
+        changed_files=["examples/odenet_mnist.py"],
+        diff_path=diff,
+    ))
+    plan = CommandPlan(
+        stage="experiment",
+        summary="Run bounded training",
+        commands=["python examples/odenet_mnist.py --gpu 0 --nepochs 1"],
+        assumptions=["CodingAgent added loss logging."],
+        feasibility="ready_to_run",
+    )
+
+    validated = validate_experiment_plan(state, plan)
+
+    assert not any("training loss" in item for item in validated.needs_user_input)

@@ -73,6 +73,9 @@ def run_task(task: ReproTask) -> ReproState:
 
 def _final_summary(state: ReproState) -> str:
     blocked_result = _blocking_coding_agent_result(state)
+    no_experiment_results = not any(attempt.results for attempt in state.experiment_attempts)
+    if no_experiment_results:
+        return _no_experiment_summary(state)
     if blocked_result is not None:
         lines = [
             "Experiment commands were not executed because CodingAgent did not complete the required patch.",
@@ -101,6 +104,39 @@ def _final_summary(state: ReproState) -> str:
         ]
         return normalize_text("\n".join(lines))
     return normalize_text(final_review(state))
+
+
+def _no_experiment_summary(state: ReproState) -> str:
+    lines = [
+        "Experiment commands were not executed, so no reproduction metrics were produced.",
+    ]
+    if state.planned_experiment:
+        lines += [
+            "",
+            f"Planned experiment feasibility: {state.planned_experiment.feasibility or 'unknown'}",
+            f"Planned experiment: {state.planned_experiment.summary}",
+        ]
+        if state.planned_experiment.commands:
+            lines += ["Planned commands:"]
+            lines += [f"- {command}" for command in state.planned_experiment.commands]
+        if state.planned_experiment.needs_user_input:
+            lines += ["Remaining issues:"]
+            lines += [f"- {item}" for item in state.planned_experiment.needs_user_input]
+    if state.coding_agent_results:
+        latest = state.coding_agent_results[-1]
+        lines += [
+            "",
+            f"Latest CodingAgent status: {latest.status}",
+        ]
+        if latest.summary:
+            lines += [f"CodingAgent summary: {latest.summary}"]
+        if latest.report_path:
+            lines += [f"CodingAgent report: {latest.report_path}"]
+    lines += [
+        "",
+        "Next step: fix the remaining plan validation issue or rerun with a plan that satisfies the experiment goal, then execute the experiment commands.",
+    ]
+    return normalize_text("\n".join(lines))
 
 
 def _blocking_coding_agent_result(state: ReproState):

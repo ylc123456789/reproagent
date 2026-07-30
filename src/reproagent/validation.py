@@ -21,6 +21,8 @@ def validate_experiment_plan(state: ReproState, plan: CommandPlan) -> CommandPla
     command_text = "\n".join(plan.commands).lower()
     plan_text = "\n".join([plan.summary, *plan.assumptions, plan.stop_reason or ""]).lower()
     probe_text = _probe_text(state).lower()
+    coding_agent_text = _coding_agent_text(state).lower()
+    evidence_text = "\n".join([probe_text, coding_agent_text])
 
     if _mentions_any(goal, ("bounded", "short", "small", "one epoch", "few epoch")) and not _mentions_any(
         command_text,
@@ -28,10 +30,10 @@ def validate_experiment_plan(state: ReproState, plan: CommandPlan) -> CommandPla
     ):
         issues.append("Goal asks for a bounded run, but the final commands do not set an explicit training budget such as epochs/steps.")
 
-    if "gpu" in goal and not _has_gpu_execution_evidence(command_text, plan_text, probe_text):
+    if "gpu" in goal and not _has_gpu_execution_evidence(command_text, plan_text, evidence_text):
         issues.append("Goal asks for GPU execution, but the final plan does not show command-level GPU use or probe evidence that the entry point defaults to CUDA/GPU.")
 
-    if "loss" in goal and _loss_logging_is_uncertain(probe_text):
+    if "loss" in goal and _loss_logging_is_uncertain(evidence_text):
         issues.append("Goal asks for training loss, but probe evidence does not show that the unmodified script prints/logs loss; mark this as needs_patch or explicitly report the metric as unavailable.")
 
     if _mentions_any(plan_text, GUESS_MARKERS):
@@ -72,6 +74,19 @@ def _probe_text(state: ReproState) -> str:
             for path in (result.stdout_path, result.stderr_path):
                 if path.exists():
                     chunks.append(path.read_text(encoding="utf-8", errors="replace")[-5000:])
+    return "\n".join(chunks)
+
+
+def _coding_agent_text(state: ReproState) -> str:
+    chunks: list[str] = []
+    for result in state.coding_agent_results:
+        chunks.append(result.status)
+        chunks.append(result.summary)
+        chunks.extend(result.changed_files)
+        chunks.extend(result.residual_risks)
+        for path in (result.diff_path, result.report_path):
+            if path and path.exists():
+                chunks.append(path.read_text(encoding="utf-8", errors="replace")[-5000:])
     return "\n".join(chunks)
 
 

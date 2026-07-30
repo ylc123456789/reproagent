@@ -167,3 +167,34 @@ def test_post_patch_probe_uses_partial_success_rule(tmp_path, monkeypatch):
 
     assert _run_probe_once_after_patch(state)
     assert len(state.probe_attempts) == 1
+
+
+
+def test_final_summary_without_experiment_results_does_not_call_llm(tmp_path, monkeypatch):
+    def fail_final_review(state):
+        raise AssertionError("LLM final review should not run without experiment results")
+
+    import reproagent.main as main_module
+
+    monkeypatch.setattr(main_module, "final_review", fail_final_review)
+    state = ReproState(
+        task=ReproTask(
+            paper_url="paper",
+            repo_url="repo",
+            workspace_dir=tmp_path,
+            experiment_goal="Run bounded MNIST and report loss.",
+        ),
+        planned_experiment=CommandPlan(
+            stage="experiment",
+            summary="Run MNIST.",
+            commands=["python examples/odenet_mnist.py --gpu 0"],
+            feasibility="blocked",
+            needs_user_input=["Goal asks for a bounded run."],
+        ),
+    )
+
+    summary = _final_summary(state)
+
+    assert "Experiment commands were not executed" in summary
+    assert "no reproduction metrics" in summary
+    assert "Goal asks for a bounded run" in summary
