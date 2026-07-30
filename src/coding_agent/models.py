@@ -111,7 +111,7 @@ class ControllerAction(BaseModel):
         "finish",
         "ask_user",
     ]
-    reasoning: str
+    reasoning: str = ""
     path: str | None = None
     query: str | None = None
     command: str | None = None

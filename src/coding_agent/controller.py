@@ -79,6 +79,14 @@ def run_step_controller(spec: CodeTaskSpec) -> PatchReport:
                 context = build_repo_context(spec)
 
             if action.action == "finish":
+                auto_verification = _run_missing_finish_verification(spec, state.steps, output_dir, step)
+                if auto_verification:
+                    record.verification_results.extend(auto_verification)
+                    record.observation = _append_observation(
+                        record.observation,
+                        f"Auto-ran {len(auto_verification)} verification command(s) before finish.",
+                    )
+                    verification_results.extend(auto_verification)
                 diff_path = write_diff(current_diff(spec.repo_path), output_dir)
                 report = PatchReport(
                     status=_final_status(action.status, changed_files, verification_results, bool(spec.verify_commands)),
@@ -199,6 +207,32 @@ def execute_action(spec: CodeTaskSpec, action: ControllerAction, output_dir: Pat
         return StepRecord(step=step, action=action, observation=action.summary or action.reasoning)
     raise ValueError(f"unsupported action: {action.action}")
 
+
+
+def _run_missing_finish_verification(
+    spec: CodeTaskSpec,
+    steps: list[StepRecord],
+    output_dir: Path,
+    finish_step: int,
+):
+    if not spec.verify_commands:
+        return []
+    last_change_step = max((step.step for step in steps if step.changed_files), default=0)
+    if last_change_step == 0:
+        return []
+    last_verify_step = max((step.step for step in steps if step.verification_results), default=0)
+    if last_verify_step >= last_change_step:
+        return []
+    return run_verify_commands(
+        spec.repo_path,
+        spec.verify_commands,
+        output_dir / "logs" / f"step_{finish_step:02d}_finish_verify",
+        spec.timeout_seconds,
+    )
+
+
+def _append_observation(existing: str, addition: str) -> str:
+    return f"{existing}\n{addition}" if existing else addition
 
 def _execute_structured_edit(spec: CodeTaskSpec, action: ControllerAction, output_dir: Path) -> tuple[list[str], str]:
     if not action.path:
