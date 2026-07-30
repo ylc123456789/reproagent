@@ -1,5 +1,5 @@
-from reproagent.main import _final_summary, build_parser
-from reproagent.models import CodingAgentResult, CommandPlan, ReproState, ReproTask
+from reproagent.main import _final_summary, _stage_succeeded, build_parser
+from reproagent.models import CodingAgentResult, CommandPlan, CommandResult, ReproState, ReproTask, StageResult
 
 
 def test_run_parser_requires_and_reads_experiment_goal(tmp_path):
@@ -97,3 +97,39 @@ def test_final_summary_reports_blocked_coding_agent_without_llm(tmp_path, monkey
     assert "CodingAgent status: failed" in summary
     assert "corrupt patch" in summary
     assert "Training loss is unavailable" in summary
+
+
+def test_probe_stage_succeeds_with_partial_probe_failures(tmp_path):
+    ok_stdout = tmp_path / "ok.stdout"
+    ok_stderr = tmp_path / "ok.stderr"
+    fail_stdout = tmp_path / "fail.stdout"
+    fail_stderr = tmp_path / "fail.stderr"
+    for path in [ok_stdout, ok_stderr, fail_stdout, fail_stderr]:
+        path.write_text("", encoding="utf-8")
+    stage_result = StageResult(
+        stage="probe",
+        attempt=1,
+        plan=CommandPlan(stage="probe", summary="probe", commands=["python --help", "bad probe"]),
+        results=[
+            CommandResult(command="python --help", exit_code=0, stdout_path=ok_stdout, stderr_path=ok_stderr, duration_seconds=0.1),
+            CommandResult(command="bad probe", exit_code=1, stdout_path=fail_stdout, stderr_path=fail_stderr, duration_seconds=0.1),
+        ],
+    )
+
+    assert _stage_succeeded("probe", stage_result)
+    assert not _stage_succeeded("experiment", stage_result)
+
+
+def test_probe_stage_fails_when_all_probe_commands_fail(tmp_path):
+    stdout = tmp_path / "fail.stdout"
+    stderr = tmp_path / "fail.stderr"
+    stdout.write_text("", encoding="utf-8")
+    stderr.write_text("", encoding="utf-8")
+    stage_result = StageResult(
+        stage="probe",
+        attempt=1,
+        plan=CommandPlan(stage="probe", summary="probe", commands=["bad probe"]),
+        results=[CommandResult(command="bad probe", exit_code=1, stdout_path=stdout, stderr_path=stderr, duration_seconds=0.1)],
+    )
+
+    assert not _stage_succeeded("probe", stage_result)

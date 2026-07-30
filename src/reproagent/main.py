@@ -181,11 +181,17 @@ def _run_stage_loop(state: ReproState, stage: str, max_attempts: int) -> bool:
                 return True
             continue
 
-        if not plan.commands:
-            return True
-        if stage_result.success:
+        if _stage_succeeded(stage, stage_result):
             return True
     return False
+
+
+def _stage_succeeded(stage: str, stage_result: StageResult) -> bool:
+    if not stage_result.plan.commands:
+        return True
+    if stage == "probe":
+        return any(result.success for result in stage_result.results)
+    return stage_result.success
 
 
 def _validated_experiment_plan(state: ReproState):
