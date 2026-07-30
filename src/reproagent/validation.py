@@ -91,10 +91,20 @@ def _coding_agent_text(state: ReproState) -> str:
 
 
 def _loss_logging_is_uncertain(probe_text: str) -> bool:
-    for line in probe_text.splitlines():
+    lines = probe_text.splitlines()
+    for index, line in enumerate(lines):
         lowered = line.lower()
         if "loss" in lowered and _mentions_any(lowered, LOSS_OUTPUT_MARKERS):
             return False
+
+        if _mentions_any(lowered, LOSS_OUTPUT_MARKERS):
+            following_block = "\n".join(lines[index:index + 6]).lower()
+            if "loss" in following_block:
+                return False
+
+    lowered_text = probe_text.lower()
+    if "loss_meter" in lowered_text and _mentions_any(lowered_text, LOSS_OUTPUT_MARKERS):
+        return False
     return True
 
 

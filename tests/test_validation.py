@@ -107,7 +107,18 @@ def test_validation_accepts_loss_logging_from_completed_coding_agent_patch(tmp_p
     from reproagent.models import CodingAgentResult
 
     diff = tmp_path / "diff.patch"
-    diff.write_text("+ logger.info('Loss %.4f | Test Acc %.4f', loss_meter.avg, val_acc)\n", encoding="utf-8")
+    diff.write_text(
+        "\n".join([
+            "+    loss_meter = RunningAverageMeter()",
+            "+    loss_meter.update(loss.item())",
+            "+    logger.info(",
+            "+        \"Loss {:.4f} | Train Acc {:.4f} | Test Acc {:.4f}\".format(",
+            "+            loss_meter.avg, train_acc, val_acc",
+            "+        )",
+            "+    )",
+        ]),
+        encoding="utf-8",
+    )
     state = _state_with_probe(
         tmp_path,
         "Run a bounded GPU experiment and report training loss.",
