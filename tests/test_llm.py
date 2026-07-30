@@ -123,6 +123,33 @@ def test_plan_experiment_requires_goal_constraints_from_probe(tmp_path, monkeypa
     assert plan.commands == ["python examples/odenet_mnist.py --nepochs 1 --gpu 0"]
 
 
+
+def test_complete_plan_repairs_invalid_regex_backslash(tmp_path, monkeypatch):
+    from reproagent import llm
+    from reproagent.models import RepoContext, ReproState, ReproTask
+
+    def fake_complete(state, prompt):
+        return r'''{
+          "stage": "probe",
+          "summary": "inspect",
+          "commands": [
+            "grep -nE 'argparse|parser\.add_argument|epoch' examples/odenet_mnist.py"
+          ],
+          "assumptions": [],
+          "feasibility": "ready_to_run"
+        }'''
+
+    state = ReproState(
+        task=ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path),
+        repo_context=RepoContext(repo_path=tmp_path),
+    )
+    monkeypatch.setattr(llm, "_openai_compatible_text", fake_complete)
+
+    plan = llm.plan_probe(state)
+
+    assert plan.commands == ["grep -nE 'argparse|parser\\.add_argument|epoch' examples/odenet_mnist.py"]
+
+
 def test_complete_plan_drops_false_needs_user_input(tmp_path, monkeypatch):
     from reproagent import llm
     from reproagent.models import RepoContext, ReproState, ReproTask

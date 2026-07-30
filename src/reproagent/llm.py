@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 import urllib.request
 
@@ -94,10 +95,7 @@ def _complete_plan(state: ReproState, prompt: str, stage: str) -> CommandPlan:
     if state.task.mock_llm:
         return _mock_plan(stage)
     text = _openai_compatible_text(state, prompt)
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"LLM did not return JSON: {text[:500]}") from exc
+    data = _loads_plan_json(text)
     returned_stage = data.get("stage", stage)
     if returned_stage not in {"environment", "probe", "experiment"}:
         returned_stage = stage
@@ -115,6 +113,23 @@ def _complete_plan(state: ReproState, prompt: str, stage: str) -> CommandPlan:
         stop_reason=normalize_plan_text(data.get("stop_reason")),
     )
 
+
+
+def _loads_plan_json(text: str) -> dict:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as first_error:
+        repaired = _escape_invalid_json_backslashes(text)
+        if repaired != text:
+            try:
+                return json.loads(repaired)
+            except json.JSONDecodeError:
+                pass
+        raise RuntimeError(f"LLM did not return JSON: {text[:500]}") from first_error
+
+
+def _escape_invalid_json_backslashes(text: str) -> str:
+    return re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
 
 def _as_list(value, drop_false: bool = False) -> list[str]:
     if value is None or (drop_false and value is False):
