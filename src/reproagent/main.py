@@ -241,7 +241,7 @@ def _run_probe_once_after_patch(state: ReproState) -> bool:
     stage_result = StageResult(stage="probe", attempt=attempt, plan=plan, results=results)
     state.probe_attempts.append(stage_result)
     save_state(state)
-    return not plan.commands or stage_result.success
+    return _stage_succeeded("probe", stage_result)
 
 
 def _print_plan(stage: str, attempt: int, plan) -> None:

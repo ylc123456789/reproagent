@@ -1,5 +1,5 @@
-from reproagent.main import _final_summary, _stage_succeeded, build_parser
-from reproagent.models import CodingAgentResult, CommandPlan, CommandResult, ReproState, ReproTask, StageResult
+from reproagent.main import _final_summary, _run_probe_once_after_patch, _stage_succeeded, build_parser
+from reproagent.models import CodingAgentResult, CommandPlan, CommandResult, EnvironmentInfo, RepoContext, ReproState, ReproTask, StageResult
 
 
 def test_run_parser_requires_and_reads_experiment_goal(tmp_path):
@@ -133,3 +133,37 @@ def test_probe_stage_fails_when_all_probe_commands_fail(tmp_path):
     )
 
     assert not _stage_succeeded("probe", stage_result)
+
+
+def test_post_patch_probe_uses_partial_success_rule(tmp_path, monkeypatch):
+    import reproagent.main as main_module
+
+    ok_stdout = tmp_path / 'ok.stdout'
+    ok_stderr = tmp_path / 'ok.stderr'
+    fail_stdout = tmp_path / 'fail.stdout'
+    fail_stderr = tmp_path / 'fail.stderr'
+    for path in [ok_stdout, ok_stderr, fail_stdout, fail_stderr]:
+        path.write_text('', encoding='utf-8')
+
+    probe_plan = CommandPlan(
+        stage='probe',
+        summary='post-patch probe',
+        commands=['python train.py --help', 'python train.py --gpu 0'],
+    )
+    probe_results = [
+        CommandResult(command='python train.py --help', exit_code=0, stdout_path=ok_stdout, stderr_path=ok_stderr, duration_seconds=0.1),
+        CommandResult(command='python train.py --gpu 0', exit_code=-2, stdout_path=fail_stdout, stderr_path=fail_stderr, duration_seconds=0.0),
+    ]
+
+    monkeypatch.setattr(main_module, 'plan_probe', lambda state: probe_plan)
+    monkeypatch.setattr(main_module, 'run_commands', lambda *args, **kwargs: probe_results)
+    monkeypatch.setattr(main_module, 'save_state', lambda state: None)
+
+    state = ReproState(
+        task=ReproTask(paper_url='paper', repo_url='repo', workspace_dir=tmp_path, experiment_goal='Run bounded MNIST.'),
+        repo_context=RepoContext(repo_path=tmp_path),
+        environment=EnvironmentInfo(env_name='repro-test'),
+    )
+
+    assert _run_probe_once_after_patch(state)
+    assert len(state.probe_attempts) == 1
