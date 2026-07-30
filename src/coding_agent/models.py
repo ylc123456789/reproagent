@@ -120,6 +120,7 @@ class ControllerAction(BaseModel):
     new_text: str | None = None
     anchor_text: str | None = None
     insert_text: str | None = None
+    occurrence_index: int | None = None
     status: Literal["completed", "failed", "blocked", "needs_user_input"] | None = None
     summary: str | None = None
     residual_risks: list[str] = Field(default_factory=list)

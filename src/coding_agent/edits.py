@@ -15,13 +15,13 @@ def replace_text_once(
     old_text: str,
     new_text: str,
     allowed_paths: list[str] | None = None,
+    occurrence_index: int | None = None,
 ) -> str:
     path = ensure_path_allowed(repo_root, relative_path, allowed_paths)
     text = path.read_text(encoding="utf-8", errors="ignore")
-    count = text.count(old_text)
-    if count != 1:
-        raise StructuredEditError(f"replace_text expected exactly one match in {relative_path}, found {count}")
-    path.write_text(text.replace(old_text, new_text, 1), encoding="utf-8")
+    index = _resolve_match_index(text, old_text, relative_path, "replace_text", occurrence_index)
+    updated = text[:index] + new_text + text[index + len(old_text) :]
+    path.write_text(updated, encoding="utf-8")
     return relative_path
 
 
@@ -31,8 +31,17 @@ def insert_before_anchor(
     anchor_text: str,
     insert_text: str,
     allowed_paths: list[str] | None = None,
+    occurrence_index: int | None = None,
 ) -> str:
-    return _insert_at_anchor(repo_root, relative_path, anchor_text, insert_text, before=True, allowed_paths=allowed_paths)
+    return _insert_at_anchor(
+        repo_root,
+        relative_path,
+        anchor_text,
+        insert_text,
+        before=True,
+        allowed_paths=allowed_paths,
+        occurrence_index=occurrence_index,
+    )
 
 
 def insert_after_anchor(
@@ -41,8 +50,17 @@ def insert_after_anchor(
     anchor_text: str,
     insert_text: str,
     allowed_paths: list[str] | None = None,
+    occurrence_index: int | None = None,
 ) -> str:
-    return _insert_at_anchor(repo_root, relative_path, anchor_text, insert_text, before=False, allowed_paths=allowed_paths)
+    return _insert_at_anchor(
+        repo_root,
+        relative_path,
+        anchor_text,
+        insert_text,
+        before=False,
+        allowed_paths=allowed_paths,
+        occurrence_index=occurrence_index,
+    )
 
 
 def _insert_at_anchor(
@@ -52,16 +70,12 @@ def _insert_at_anchor(
     insert_text: str,
     before: bool,
     allowed_paths: list[str] | None,
+    occurrence_index: int | None,
 ) -> str:
     path = ensure_path_allowed(repo_root, relative_path, allowed_paths)
     text = path.read_text(encoding="utf-8", errors="ignore")
-    count = text.count(anchor_text)
-    if count != 1:
-        position = "before" if before else "after"
-        raise StructuredEditError(
-            f"insert_{position} expected exactly one anchor match in {relative_path}, found {count}"
-        )
-    index = text.index(anchor_text)
+    action = "insert_before" if before else "insert_after"
+    index = _resolve_match_index(text, anchor_text, relative_path, action, occurrence_index)
     if before:
         updated = text[:index] + insert_text + text[index:]
     else:
@@ -71,3 +85,35 @@ def _insert_at_anchor(
         updated = text[:insert_at] + insert_text + text[insert_at:]
     path.write_text(updated, encoding="utf-8")
     return relative_path
+
+
+def _resolve_match_index(
+    text: str,
+    needle: str,
+    relative_path: str,
+    action: str,
+    occurrence_index: int | None,
+) -> int:
+    if needle == "":
+        raise StructuredEditError(f"{action} requires non-empty match text in {relative_path}")
+    matches = find_all(text, needle)
+    if occurrence_index is not None:
+        if occurrence_index < 1 or occurrence_index > len(matches):
+            raise StructuredEditError(
+                f"{action} occurrence_index {occurrence_index} is outside 1..{len(matches)} in {relative_path}"
+            )
+        return matches[occurrence_index - 1]
+    if len(matches) != 1:
+        raise StructuredEditError(f"{action} expected exactly one match in {relative_path}, found {len(matches)}")
+    return matches[0]
+
+
+def find_all(text: str, needle: str) -> list[int]:
+    matches: list[int] = []
+    start = 0
+    while True:
+        index = text.find(needle, start)
+        if index == -1:
+            return matches
+        matches.append(index)
+        start = index + max(len(needle), 1)
