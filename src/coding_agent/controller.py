@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .apply import PatchApplyError, apply_patch_text, current_diff, extract_patch_paths, normalize_patch_text
 from .context import build_repo_context
+from .edits import StructuredEditError, insert_after_anchor, insert_before_anchor, replace_text_once
 from .llm import LLMClient
 from .models import AgentState, CodeTaskSpec, ControllerAction, PatchReport, StepRecord
 from .report import prepare_output_dir, write_diff, write_initial_diff, write_patch_report, write_state
@@ -16,12 +17,16 @@ from .safety import SafetyError, ensure_path_allowed
 
 
 ACTION_SCHEMA = {
-    "action": "list_tree|read_file|search|apply_patch|run_command|finish|ask_user",
+    "action": "list_tree|read_file|search|replace_text|insert_before|insert_after|apply_patch|run_command|finish|ask_user",
     "reasoning": "brief reason for this next action",
-    "path": "relative file path for read_file, optional",
+    "path": "relative file path for read_file or structured edits, optional",
     "query": "search query for search, optional",
     "command": "verification command for run_command, optional",
     "patch": "unified diff for apply_patch, optional",
+    "old_text": "exact text copied from the current file for replace_text",
+    "new_text": "replacement text for replace_text",
+    "anchor_text": "exact anchor copied from the current file for insert_before/insert_after",
+    "insert_text": "text to insert before or after anchor_text",
     "status": "completed|failed|blocked|needs_user_input for finish/ask_user",
     "summary": "final or user-facing summary, optional",
     "residual_risks": ["risk strings for finish/ask_user"],
@@ -29,8 +34,23 @@ ACTION_SCHEMA = {
 
 
 class PatchRepairResponse(BaseModel):
-    patch: str
+    action: str = "apply_patch"
+    patch: str | None = None
+    path: str | None = None
+    old_text: str | None = None
+    new_text: str | None = None
+    anchor_text: str | None = None
+    insert_text: str | None = None
     notes: list[str] = Field(default_factory=list)
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def coerce_notes(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        return value
 
 
 def run_step_controller(spec: CodeTaskSpec) -> PatchReport:
@@ -55,7 +75,7 @@ def run_step_controller(spec: CodeTaskSpec) -> PatchReport:
             verification_results.extend(record.verification_results)
             write_state(state, output_dir)
 
-            if action.action in {"apply_patch", "run_command"}:
+            if action.action in {"replace_text", "insert_before", "insert_after", "apply_patch", "run_command"}:
                 context = build_repo_context(spec)
 
             if action.action == "finish":
@@ -115,8 +135,9 @@ def choose_next_action(spec: CodeTaskSpec, state: AgentState, context, client: L
     system = (
         "You are a coding agent controller inspired by modern agentic coding tools. "
         "Choose exactly one next action from the allowed action set. "
-        "Use read/search/run before editing when useful. Use apply_patch for repo changes. "
-        "Use finish only after the diff and verification evidence satisfy the task, or when failure is clear. "
+        "After reading a file, prefer structured edit actions (replace_text, insert_before, insert_after) for small local edits. "
+        "Use exact old_text or anchor_text copied from the current file. Use apply_patch only for changes that are not suitable "
+        "for exact structured edits. Use finish only after the diff and verification evidence satisfy the task, or when failure is clear. "
         "Never silently change research semantics such as model architecture, loss, optimizer, dataset split, or metric. "
         "Return only JSON matching the schema."
     )
@@ -148,6 +169,9 @@ def execute_action(spec: CodeTaskSpec, action: ControllerAction, output_dir: Pat
         if not action.query:
             raise ValueError("search requires query")
         return StepRecord(step=step, action=action, observation=_search_repo(spec.repo_path, action.query))
+    if action.action in {"replace_text", "insert_before", "insert_after"}:
+        changed, observation = _execute_structured_edit(spec, action, output_dir)
+        return StepRecord(step=step, action=action, observation=observation, changed_files=changed)
     if action.action == "apply_patch":
         if not action.patch:
             raise ValueError("apply_patch requires patch")
@@ -174,6 +198,27 @@ def execute_action(spec: CodeTaskSpec, action: ControllerAction, output_dir: Pat
     if action.action in {"finish", "ask_user"}:
         return StepRecord(step=step, action=action, observation=action.summary or action.reasoning)
     raise ValueError(f"unsupported action: {action.action}")
+
+
+def _execute_structured_edit(spec: CodeTaskSpec, action: ControllerAction, output_dir: Path) -> tuple[list[str], str]:
+    if not action.path:
+        raise ValueError(f"{action.action} requires path")
+    if action.action == "replace_text":
+        if action.old_text is None or action.new_text is None:
+            raise ValueError("replace_text requires old_text and new_text")
+        changed = replace_text_once(spec.repo_path, action.path, action.old_text, action.new_text, spec.allowed_paths)
+    elif action.action == "insert_before":
+        if action.anchor_text is None or action.insert_text is None:
+            raise ValueError("insert_before requires anchor_text and insert_text")
+        changed = insert_before_anchor(spec.repo_path, action.path, action.anchor_text, action.insert_text, spec.allowed_paths)
+    elif action.action == "insert_after":
+        if action.anchor_text is None or action.insert_text is None:
+            raise ValueError("insert_after requires anchor_text and insert_text")
+        changed = insert_after_anchor(spec.repo_path, action.path, action.anchor_text, action.insert_text, spec.allowed_paths)
+    else:
+        raise ValueError(f"unsupported structured edit: {action.action}")
+    diff_path = write_diff(current_diff(spec.repo_path), output_dir)
+    return [changed], f"Structured edit {action.action} applied to {changed}. Current diff written to {diff_path}."
 
 
 def _apply_patch_with_repair(
@@ -205,14 +250,37 @@ def _apply_patch_with_repair(
                     f"patch failed validation/application after {spec.patch_repair_attempts} repair attempt(s):\n{joined}",
                     joined,
                 ) from exc
-            repaired = repair_patch(spec, patch, stderr, client)
-            patch = normalize_patch_text(repaired.patch)
+            repaired = repair_patch(spec, patch, stderr, output_dir, step, attempt, client)
             repair_notes.extend(repaired.notes)
+            if repaired.action in {"replace_text", "insert_before", "insert_after"}:
+                action = ControllerAction(
+                    action=repaired.action,
+                    reasoning="Repair failed unified diff by using a deterministic structured edit.",
+                    path=repaired.path,
+                    old_text=repaired.old_text,
+                    new_text=repaired.new_text,
+                    anchor_text=repaired.anchor_text,
+                    insert_text=repaired.insert_text,
+                )
+                changed, observation = _execute_structured_edit(spec, action, output_dir)
+                notes = f" Repair notes: {'; '.join(repair_notes)}" if repair_notes else ""
+                return changed, f"Patch converted to structured edit after {attempt} failed diff attempt(s). {observation}{notes}"
+            if repaired.action != "apply_patch" or not repaired.patch:
+                raise PatchApplyError(f"patch repair returned unsupported action or empty patch: {repaired.action}")
+            patch = normalize_patch_text(repaired.patch)
 
     raise PatchApplyError("patch repair loop exited unexpectedly")
 
 
-def repair_patch(spec: CodeTaskSpec, failed_patch: str, stderr: str, client: LLMClient) -> PatchRepairResponse:
+def repair_patch(
+    spec: CodeTaskSpec,
+    failed_patch: str,
+    stderr: str,
+    output_dir: Path,
+    step: int,
+    attempt: int,
+    client: LLMClient,
+) -> PatchRepairResponse:
     paths = extract_patch_paths(failed_patch)
     file_context = []
     for rel in paths[:6]:
@@ -221,11 +289,12 @@ def repair_patch(spec: CodeTaskSpec, failed_patch: str, stderr: str, client: LLM
             file_context.append({"path": rel, "text": path.read_text(encoding="utf-8", errors="ignore")[:24_000]})
         except Exception as exc:
             file_context.append({"path": rel, "error": str(exc)})
+    _save_repair_context(output_dir, step, attempt, file_context)
 
     system = (
-        "You repair malformed or non-applicable unified diffs for a coding agent. "
-        "Return only JSON with fields patch and notes. The patch must be a valid unified diff, use repo-relative paths, "
-        "and preserve the original edit intent without adding unrelated changes. Do not use markdown fences."
+        "You repair failed edits for a coding agent. Prefer structured edit actions over another unified diff. "
+        "For a small local edit, return action replace_text, insert_before, or insert_after with exact text copied from "
+        "current_file_context. Use apply_patch only when a structured edit is unsuitable. Return only JSON."
     )
     user = {
         "task_goal": spec.task_goal,
@@ -234,9 +303,20 @@ def repair_patch(spec: CodeTaskSpec, failed_patch: str, stderr: str, client: LLM
         "git_apply_check_or_apply_error": stderr,
         "failed_patch": failed_patch,
         "current_file_context": file_context,
-        "schema": {"patch": "valid unified diff", "notes": ["repair note"]},
+        "schema": {
+            "action": "replace_text|insert_before|insert_after|apply_patch",
+            "path": "relative path for structured edit",
+            "old_text": "exact old text for replace_text",
+            "new_text": "replacement text for replace_text",
+            "anchor_text": "exact anchor text for insert_before/insert_after",
+            "insert_text": "text to insert for insert_before/insert_after",
+            "patch": "valid unified diff only if action is apply_patch",
+            "notes": ["repair note"],
+        },
     }
-    return PatchRepairResponse.model_validate(client.complete_json(system, json.dumps(user, indent=2)))
+    response = PatchRepairResponse.model_validate(client.complete_json(system, json.dumps(user, indent=2)))
+    _save_repair_response(output_dir, step, attempt, response)
+    return response
 
 
 def _save_failed_patch(output_dir: Path, step: int, attempt: int, patch: str, stderr: str) -> None:
@@ -245,6 +325,20 @@ def _save_failed_patch(output_dir: Path, step: int, attempt: int, patch: str, st
     stem = f"failed_patch_{step:02d}_{attempt:02d}"
     (logs / f"{stem}.patch").write_text(patch, encoding="utf-8")
     (logs / f"{stem}.stderr").write_text(stderr, encoding="utf-8")
+
+
+def _save_repair_context(output_dir: Path, step: int, attempt: int, file_context: list[dict[str, str]]) -> None:
+    logs = output_dir / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    path = logs / f"repair_context_{step:02d}_{attempt:02d}.json"
+    path.write_text(json.dumps(file_context, indent=2), encoding="utf-8")
+
+
+def _save_repair_response(output_dir: Path, step: int, attempt: int, response: PatchRepairResponse) -> None:
+    logs = output_dir / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    path = logs / f"repair_response_{step:02d}_{attempt:02d}.json"
+    path.write_text(response.model_dump_json(indent=2), encoding="utf-8")
 
 
 def _search_repo(repo: Path, query: str, limit: int = 80) -> str:

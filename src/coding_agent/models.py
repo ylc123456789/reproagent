@@ -103,6 +103,9 @@ class ControllerAction(BaseModel):
         "list_tree",
         "read_file",
         "search",
+        "replace_text",
+        "insert_before",
+        "insert_after",
         "apply_patch",
         "run_command",
         "finish",
@@ -113,6 +116,10 @@ class ControllerAction(BaseModel):
     query: str | None = None
     command: str | None = None
     patch: str | None = None
+    old_text: str | None = None
+    new_text: str | None = None
+    anchor_text: str | None = None
+    insert_text: str | None = None
     status: Literal["completed", "failed", "blocked", "needs_user_input"] | None = None
     summary: str | None = None
     residual_risks: list[str] = Field(default_factory=list)
