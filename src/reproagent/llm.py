@@ -193,17 +193,21 @@ def _mirror_context(state: ReproState) -> str:
     strict = "strict" if state.task.mirror_strict else "preferred"
     lines = [
         f"Mirror policy: {profile} ({strict}). Prefer the configured mirror profile for dependency downloads.",
-        "For ordinary pip packages, prefer `-i https://mirrors.aliyun.com/pypi/simple` when adding an explicit pip index.",
-        "For PyTorch CUDA wheels, prefer Aliyun PyTorch wheel find-links such as `-f https://mirrors.aliyun.com/pytorch-wheels/cu124/` or the CUDA version matching the selected torch build.",
-        "Do not use `--index-url https://download.pytorch.org/whl/...` when a matching mirror wheel page is available; `--index-url` overrides the server's configured pip mirror.",
+        "For ordinary pip packages, prefer the server's configured pip mirror; if adding an explicit pip index, prefer `-i https://mirrors.aliyun.com/pypi/simple`.",
+        "Avoid `--index-url https://download.pytorch.org/whl/...` because it overrides domestic/server pip mirrors and often downloads slowly from international PyTorch hosts.",
         "Install the intended GPU ML framework before `pip install -e .` when the repo has broad dependencies like torch>=x, so editable install does not pull an incompatible/latest framework build.",
     ]
     if profile == "autodl":
-        lines.append("This run is expected to work well on AutoDL-style servers: keep conda envs/caches on the data disk when already configured, and prefer the server's configured mirrors plus Aliyun PyTorch wheels.")
+        lines += [
+            "AutoDL official guidance: first prefer an AutoDL image that already includes the required PyTorch/TensorFlow version. If installing PyTorch manually, prefer plain pip pins such as `pip install torch==2.6.0 torchvision==0.21.0` and remove PyTorch official `-f`/`--index-url` options so installation uses the domestic pip source configured on the instance.",
+            "Only use Aliyun PyTorch wheel find-links such as `-f https://mirrors.aliyun.com/pytorch-wheels/cu124/` when an explicit local-version wheel like `torch==2.6.0+cu124` is required and available from that mirror.",
+            "Keep conda envs/caches on the data disk when already configured on AutoDL-style servers.",
+        ]
+    elif profile == "cn":
+        lines.append("For explicit PyTorch local-version CUDA wheels, prefer a domestic find-links mirror such as `-f https://mirrors.aliyun.com/pytorch-wheels/cu124/` when the matching CUDA wheel page exists.")
     if state.task.mirror_strict:
         lines.append("Strict mirror mode: if a required package or GPU wheel is unavailable from the preferred mirror/profile, set feasibility='needs_config' or 'blocked' and explain the missing mirror instead of silently falling back to official international indexes.")
     return "\n".join(lines)
-
 
 def _recent_logs(state: ReproState, max_chars: int = 12000) -> str:
     chunks: list[str] = []

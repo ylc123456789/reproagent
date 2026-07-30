@@ -178,6 +178,7 @@ def test_base_context_includes_autodl_mirror_policy(tmp_path):
     context = _base_context(state)
 
     assert "Mirror policy: autodl (strict)" in context
-    assert "mirrors.aliyun.com/pytorch-wheels" in context
+    assert "AutoDL official guidance" in context
+    assert "remove PyTorch official" in context
     assert "download.pytorch.org" in context
     assert "Strict mirror mode" in context
