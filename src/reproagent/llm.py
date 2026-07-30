@@ -27,7 +27,7 @@ def plan_environment(state: ReproState) -> CommandPlan:
 Plan dependency setup commands needed inside the already-created conda environment for the experiment goal and final reproduction target.
 Return JSON with fields: stage, summary, commands, assumptions, stop_reason.
 Use stage='environment'. Prefer project-provided files such as requirements.txt, pyproject.toml, setup.py, or environment.yml when appropriate, but do not blindly accept an unconstrained latest GPU framework package if it conflicts with the detected hardware.
-If an NVIDIA GPU is visible and the project uses PyTorch/JAX/TensorFlow, configure a GPU-capable build compatible with the reported driver/CUDA capability. For PyTorch, inspect the repo pins first; if the repo only says something broad like torch>=x, choose an official build compatible with this machine instead of defaulting to the newest CUDA build.
+If an NVIDIA GPU is visible and the project uses PyTorch/JAX/TensorFlow, configure a GPU-capable build compatible with the reported driver/CUDA capability. For PyTorch, inspect the repo pins first; if the repo only says something broad like torch>=x, choose a build compatible with this machine instead of defaulting to the newest CUDA build. Follow the mirror policy from the run context when choosing package indexes or find-links.
 For older PyTorch builds, avoid incompatible NumPy 2.x ABI issues; pin numpy<2 when the selected torch build or logs indicate NumPy 1.x compatibility.
 Do not create or activate conda environments. Commands already run inside the prepared conda environment.
 Do not run repo examples, demos, train scripts, MNIST scripts, or long evaluations in the environment stage. Use only quick checks such as `python -c "import torch; print(torch.cuda.is_available())"` or a tiny inline tensor operation expected to finish in seconds. Put real reproduction/demo/evaluation commands in the experiment stage after audit passes.
@@ -172,6 +172,7 @@ Timeout budget per command: {state.task.timeout_seconds}s
 Repo path: {ctx.repo_path}
 Commit: {ctx.commit_hash}
 {env_text}
+{_mirror_context(state)}
 
 Hardware context:
 {ctx.hardware_text}
@@ -182,6 +183,26 @@ File tree:
 README/docs excerpt:
 {ctx.readme_text[:16000]}
 """
+
+
+def _mirror_context(state: ReproState) -> str:
+    profile = state.task.mirror_profile
+    if profile == "none":
+        return "Mirror policy: none. Use the repository instructions, the current pip/conda configuration, or official package indexes as appropriate."
+
+    strict = "strict" if state.task.mirror_strict else "preferred"
+    lines = [
+        f"Mirror policy: {profile} ({strict}). Prefer the configured mirror profile for dependency downloads.",
+        "For ordinary pip packages, prefer `-i https://mirrors.aliyun.com/pypi/simple` when adding an explicit pip index.",
+        "For PyTorch CUDA wheels, prefer Aliyun PyTorch wheel find-links such as `-f https://mirrors.aliyun.com/pytorch-wheels/cu124/` or the CUDA version matching the selected torch build.",
+        "Do not use `--index-url https://download.pytorch.org/whl/...` when a matching mirror wheel page is available; `--index-url` overrides the server's configured pip mirror.",
+        "Install the intended GPU ML framework before `pip install -e .` when the repo has broad dependencies like torch>=x, so editable install does not pull an incompatible/latest framework build.",
+    ]
+    if profile == "autodl":
+        lines.append("This run is expected to work well on AutoDL-style servers: keep conda envs/caches on the data disk when already configured, and prefer the server's configured mirrors plus Aliyun PyTorch wheels.")
+    if state.task.mirror_strict:
+        lines.append("Strict mirror mode: if a required package or GPU wheel is unavailable from the preferred mirror/profile, set feasibility='needs_config' or 'blocked' and explain the missing mirror instead of silently falling back to official international indexes.")
+    return "\n".join(lines)
 
 
 def _recent_logs(state: ReproState, max_chars: int = 12000) -> str:

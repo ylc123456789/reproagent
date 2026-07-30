@@ -198,3 +198,19 @@ def test_final_summary_without_experiment_results_does_not_call_llm(tmp_path, mo
     assert "Experiment commands were not executed" in summary
     assert "no reproduction metrics" in summary
     assert "Goal asks for a bounded run" in summary
+
+
+def test_run_parser_reads_mirror_options(tmp_path):
+    parser = build_parser()
+    args = parser.parse_args([
+        "run",
+        "--paper", "paper",
+        "--repo", "repo",
+        "--workspace", str(tmp_path),
+        "--experiment-goal", "Run MNIST.",
+        "--mirror-profile", "autodl",
+        "--mirror-strict",
+    ])
+
+    assert args.mirror_profile == "autodl"
+    assert args.mirror_strict

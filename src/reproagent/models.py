@@ -7,6 +7,7 @@ from typing import Literal
 
 StageName = Literal["environment", "probe", "experiment"]
 Feasibility = Literal["ready_to_run", "needs_config", "needs_patch", "blocked", "unsafe_or_too_expensive"]
+MirrorProfile = Literal["none", "cn", "autodl"]
 from pydantic import BaseModel, Field
 
 def _task_id() -> str:
@@ -32,6 +33,8 @@ class ReproTask(BaseModel):
     plan_only: bool = False
     enable_coding_agent: bool = False
     max_coding_agent_steps: int = 12
+    mirror_profile: MirrorProfile = "none"
+    mirror_strict: bool = False
 
 class RepoContext(BaseModel):
     repo_path: Path

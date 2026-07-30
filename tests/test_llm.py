@@ -157,3 +157,27 @@ def test_final_review_normalizes_llm_text(tmp_path, monkeypatch):
     summary = llm.final_review(state)
 
     assert summary == "paper's GPU-accelerated result"
+
+
+def test_base_context_includes_autodl_mirror_policy(tmp_path):
+    from reproagent.llm import _base_context
+    from reproagent.models import RepoContext, ReproState, ReproTask
+
+    state = ReproState(
+        task=ReproTask(
+            paper_url="paper",
+            repo_url="repo",
+            workspace_dir=tmp_path,
+            experiment_goal="Run GPU MNIST.",
+            mirror_profile="autodl",
+            mirror_strict=True,
+        ),
+        repo_context=RepoContext(repo_path=tmp_path, readme_text="", file_tree=""),
+    )
+
+    context = _base_context(state)
+
+    assert "Mirror policy: autodl (strict)" in context
+    assert "mirrors.aliyun.com/pytorch-wheels" in context
+    assert "download.pytorch.org" in context
+    assert "Strict mirror mode" in context
