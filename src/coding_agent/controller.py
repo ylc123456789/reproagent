@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .apply import apply_patch_text, current_diff
+from pydantic import BaseModel, Field
+
+from .apply import PatchApplyError, apply_patch_text, current_diff, extract_patch_paths, normalize_patch_text
 from .context import build_repo_context
 from .llm import LLMClient
 from .models import AgentState, CodeTaskSpec, ControllerAction, PatchReport, StepRecord
@@ -26,6 +28,11 @@ ACTION_SCHEMA = {
 }
 
 
+class PatchRepairResponse(BaseModel):
+    patch: str
+    notes: list[str] = Field(default_factory=list)
+
+
 def run_step_controller(spec: CodeTaskSpec) -> PatchReport:
     output_dir = prepare_output_dir(spec)
     log_dir = output_dir / "logs"
@@ -42,7 +49,7 @@ def run_step_controller(spec: CodeTaskSpec) -> PatchReport:
         try:
             action = choose_next_action(spec, state, context, client)
             (log_dir / f"action_{step:02d}.json").write_text(action.model_dump_json(indent=2), encoding="utf-8")
-            record = execute_action(spec, action, output_dir, step)
+            record = execute_action(spec, action, output_dir, step, client)
             state.steps.append(record)
             changed_files.extend(path for path in record.changed_files if path not in changed_files)
             verification_results.extend(record.verification_results)
@@ -127,7 +134,7 @@ def choose_next_action(spec: CodeTaskSpec, state: AgentState, context, client: L
     return ControllerAction.model_validate(client.complete_json(system, json.dumps(user, indent=2)))
 
 
-def execute_action(spec: CodeTaskSpec, action: ControllerAction, output_dir: Path, step: int) -> StepRecord:
+def execute_action(spec: CodeTaskSpec, action: ControllerAction, output_dir: Path, step: int, client: LLMClient) -> StepRecord:
     if action.action == "list_tree":
         context = build_repo_context(spec)
         return StepRecord(step=step, action=action, observation="\n".join(context.tree[:300]))
@@ -144,14 +151,8 @@ def execute_action(spec: CodeTaskSpec, action: ControllerAction, output_dir: Pat
     if action.action == "apply_patch":
         if not action.patch:
             raise ValueError("apply_patch requires patch")
-        changed = apply_patch_text(spec.repo_path, action.patch, spec.allowed_paths)
-        diff_path = write_diff(current_diff(spec.repo_path), output_dir)
-        return StepRecord(
-            step=step,
-            action=action,
-            observation=f"Patch applied. Current diff written to {diff_path}.",
-            changed_files=changed,
-        )
+        changed, observation = _apply_patch_with_repair(spec, action.patch, output_dir, step, client)
+        return StepRecord(step=step, action=action, observation=observation, changed_files=changed)
     if action.action == "run_command":
         command = action.command or (spec.verify_commands[0] if spec.verify_commands else None)
         if not command:
@@ -173,6 +174,77 @@ def execute_action(spec: CodeTaskSpec, action: ControllerAction, output_dir: Pat
     if action.action in {"finish", "ask_user"}:
         return StepRecord(step=step, action=action, observation=action.summary or action.reasoning)
     raise ValueError(f"unsupported action: {action.action}")
+
+
+def _apply_patch_with_repair(
+    spec: CodeTaskSpec,
+    patch_text: str,
+    output_dir: Path,
+    step: int,
+    client: LLMClient,
+) -> tuple[list[str], str]:
+    patch = normalize_patch_text(patch_text)
+    errors: list[str] = []
+    repair_notes: list[str] = []
+    max_attempts = spec.patch_repair_attempts + 1
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            changed = apply_patch_text(spec.repo_path, patch, spec.allowed_paths)
+            diff_path = write_diff(current_diff(spec.repo_path), output_dir)
+            suffix = "" if attempt == 1 else f" after {attempt - 1} repair attempt(s)"
+            notes = f" Repair notes: {'; '.join(repair_notes)}" if repair_notes else ""
+            return changed, f"Patch applied{suffix}. Current diff written to {diff_path}.{notes}"
+        except (PatchApplyError, SafetyError) as exc:
+            stderr = getattr(exc, "stderr", "") or str(exc)
+            errors.append(stderr)
+            _save_failed_patch(output_dir, step, attempt, patch, stderr)
+            if attempt >= max_attempts:
+                joined = "\n---\n".join(errors)
+                raise PatchApplyError(
+                    f"patch failed validation/application after {spec.patch_repair_attempts} repair attempt(s):\n{joined}",
+                    joined,
+                ) from exc
+            repaired = repair_patch(spec, patch, stderr, client)
+            patch = normalize_patch_text(repaired.patch)
+            repair_notes.extend(repaired.notes)
+
+    raise PatchApplyError("patch repair loop exited unexpectedly")
+
+
+def repair_patch(spec: CodeTaskSpec, failed_patch: str, stderr: str, client: LLMClient) -> PatchRepairResponse:
+    paths = extract_patch_paths(failed_patch)
+    file_context = []
+    for rel in paths[:6]:
+        try:
+            path = ensure_path_allowed(spec.repo_path, rel, spec.allowed_paths or None)
+            file_context.append({"path": rel, "text": path.read_text(encoding="utf-8", errors="ignore")[:24_000]})
+        except Exception as exc:
+            file_context.append({"path": rel, "error": str(exc)})
+
+    system = (
+        "You repair malformed or non-applicable unified diffs for a coding agent. "
+        "Return only JSON with fields patch and notes. The patch must be a valid unified diff, use repo-relative paths, "
+        "and preserve the original edit intent without adding unrelated changes. Do not use markdown fences."
+    )
+    user = {
+        "task_goal": spec.task_goal,
+        "constraints": spec.constraints,
+        "allowed_paths": spec.allowed_paths,
+        "git_apply_check_or_apply_error": stderr,
+        "failed_patch": failed_patch,
+        "current_file_context": file_context,
+        "schema": {"patch": "valid unified diff", "notes": ["repair note"]},
+    }
+    return PatchRepairResponse.model_validate(client.complete_json(system, json.dumps(user, indent=2)))
+
+
+def _save_failed_patch(output_dir: Path, step: int, attempt: int, patch: str, stderr: str) -> None:
+    logs = output_dir / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    stem = f"failed_patch_{step:02d}_{attempt:02d}"
+    (logs / f"{stem}.patch").write_text(patch, encoding="utf-8")
+    (logs / f"{stem}.stderr").write_text(stderr, encoding="utf-8")
 
 
 def _search_repo(repo: Path, query: str, limit: int = 80) -> str:

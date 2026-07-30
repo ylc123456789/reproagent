@@ -17,6 +17,7 @@ class CodeTaskSpec(BaseModel):
     allowed_paths: list[str] = Field(default_factory=list)
     max_iterations: int = 3
     max_steps: int = 12
+    patch_repair_attempts: int = 2
     timeout_seconds: int = 900
     api_base: str = "https://api.openai.com/v1"
     api_key_env: str = "OPENAI_API_KEY"
@@ -45,6 +46,13 @@ class CodeTaskSpec(BaseModel):
     def max_steps_positive(cls, value: int) -> int:
         if value < 1:
             raise ValueError("max_steps must be >= 1")
+        return value
+
+    @field_validator("patch_repair_attempts")
+    @classmethod
+    def patch_repair_attempts_non_negative(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("patch_repair_attempts must be >= 0")
         return value
 
 
