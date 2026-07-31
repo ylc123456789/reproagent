@@ -6,7 +6,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, field_validator
 
 from .apply import PatchApplyError, apply_patch_text, current_diff, extract_patch_paths, normalize_patch_text
-from .context import build_repo_context
+from .context import TEXT_SUFFIXES, build_repo_context
 from .context_policy import ContextPolicy, resolve_context_policy
 from .edits import StructuredEditError, find_all, insert_after_anchor, insert_before_anchor, replace_text_once
 from .llm import LLMClient
@@ -78,6 +78,7 @@ def run_step_controller(spec: CodeTaskSpec) -> PatchReport:
             break
         try:
             action = choose_next_action(spec, state, context, client)
+            action = _normalize_action(spec, state.steps, action)
             (log_dir / f"action_{step:02d}.json").write_text(action.model_dump_json(indent=2), encoding="utf-8")
             record = execute_action(spec, action, output_dir, step, client)
             state.steps.append(record)
@@ -185,6 +186,73 @@ def choose_next_action(spec: CodeTaskSpec, state: AgentState, context, client: L
         "available_actions": ACTION_SCHEMA,
     }
     return ControllerAction.model_validate(client.complete_json(system, json.dumps(user, indent=2)))
+
+
+def _normalize_action(spec: CodeTaskSpec, steps: list[StepRecord], action: ControllerAction) -> ControllerAction:
+    if action.action not in {"replace_text", "insert_before", "insert_after"} or action.path:
+        return action
+    inferred = _infer_structured_edit_path(spec, steps, action)
+    if not inferred:
+        return action
+    reason = action.reasoning or ""
+    suffix = f" Inferred missing path as {inferred}."
+    return action.model_copy(update={"path": inferred, "reasoning": reason + suffix})
+
+
+def _infer_structured_edit_path(spec: CodeTaskSpec, steps: list[StepRecord], action: ControllerAction) -> str | None:
+    needle = action.old_text if action.action == "replace_text" else action.anchor_text
+    if not needle:
+        return None
+    recent_paths = _recent_action_paths(steps)
+    recent_matches = _matching_paths_for_text(spec, needle, recent_paths)
+    if len(recent_matches) == 1:
+        return recent_matches[0]
+    all_matches = _matching_paths_for_text(spec, needle, _candidate_text_paths(spec))
+    if len(all_matches) == 1:
+        return all_matches[0]
+    return None
+
+
+def _recent_action_paths(steps: list[StepRecord]) -> list[str]:
+    paths = []
+    for step in reversed(steps):
+        path = step.action.path
+        if path and path not in paths:
+            paths.append(path)
+    return paths
+
+
+def _matching_paths_for_text(spec: CodeTaskSpec, needle: str, paths: list[str]) -> list[str]:
+    matches = []
+    for rel in paths:
+        try:
+            path = ensure_path_allowed(spec.repo_path, rel, spec.allowed_paths or None)
+        except Exception:
+            continue
+        if not path.is_file() or Path(rel).suffix.lower() not in TEXT_SUFFIXES:
+            continue
+        try:
+            if needle in path.read_text(encoding="utf-8", errors="ignore"):
+                matches.append(rel)
+        except OSError:
+            continue
+    return matches
+
+
+def _candidate_text_paths(spec: CodeTaskSpec) -> list[str]:
+    paths = []
+    for path in sorted(spec.repo_path.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(spec.repo_path).as_posix()
+        if path.suffix.lower() not in TEXT_SUFFIXES:
+            continue
+        try:
+            ensure_path_allowed(spec.repo_path, rel, spec.allowed_paths or None)
+        except Exception:
+            continue
+        paths.append(rel)
+    return paths
 
 
 def execute_action(spec: CodeTaskSpec, action: ControllerAction, output_dir: Path, step: int, client: LLMClient) -> StepRecord:
