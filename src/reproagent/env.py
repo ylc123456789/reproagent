@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from .models import EnvironmentInfo, ReproState
@@ -42,9 +43,13 @@ def ensure_environment(state: ReproState) -> EnvironmentInfo:
         cmd = [conda, "create", "-n", env_name, f"python={state.task.python_version}", "-y"]
         used_yml = False
 
-    result = subprocess.run(cmd, cwd=str(state.repo_context.repo_path), text=True, capture_output=True, timeout=state.task.timeout_seconds)
-    stdout_path.write_text(result.stdout or "", encoding="utf-8", errors="replace")
-    stderr_path.write_text(result.stderr or "", encoding="utf-8", errors="replace")
+    result = _run_conda_setup_with_retries(
+        cmd,
+        cwd=state.repo_context.repo_path,
+        timeout=state.task.timeout_seconds,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+    )
     if result.returncode != 0:
         raise RuntimeError(f"conda environment setup failed for {env_name}; see {stderr_path}")
 
@@ -56,6 +61,56 @@ def ensure_environment(state: ReproState) -> EnvironmentInfo:
         setup_stdout_path=stdout_path,
         setup_stderr_path=stderr_path,
     )
+
+
+
+def _run_conda_setup_with_retries(
+    cmd: list[str],
+    cwd: Path,
+    timeout: int,
+    stdout_path: Path,
+    stderr_path: Path,
+    attempts: int = 3,
+    delay_seconds: float = 3.0,
+) -> subprocess.CompletedProcess[str]:
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+    last_result: subprocess.CompletedProcess[str] | None = None
+    for attempt in range(1, attempts + 1):
+        result = subprocess.run(cmd, cwd=str(cwd), text=True, capture_output=True, timeout=timeout)
+        last_result = result
+        stdout_chunks.append(f"===== conda setup attempt {attempt}/{attempts} =====\n")
+        stdout_chunks.append(result.stdout or "")
+        stderr_chunks.append(f"===== conda setup attempt {attempt}/{attempts} =====\n")
+        stderr_chunks.append(result.stderr or "")
+        stdout_path.write_text("".join(stdout_chunks), encoding="utf-8", errors="replace")
+        stderr_path.write_text("".join(stderr_chunks), encoding="utf-8", errors="replace")
+        if result.returncode == 0:
+            return result
+        if attempt < attempts and _is_transient_conda_setup_error(result.stderr or ""):
+            time.sleep(delay_seconds)
+            continue
+        return result
+    assert last_result is not None
+    return last_result
+
+
+def _is_transient_conda_setup_error(stderr: str) -> bool:
+    lowered = stderr.lower()
+    markers = (
+        "condahttperror",
+        "http 502",
+        "http 503",
+        "http 504",
+        "bad gateway",
+        "gateway timeout",
+        "remote server error",
+        "connection aborted",
+        "connection reset",
+        "read timed out",
+    )
+    return any(marker in lowered for marker in markers)
+
 
 
 def build_backend_command(env_name: str, command: str, conda: str | None = None) -> list[str]:
