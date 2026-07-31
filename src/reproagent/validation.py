@@ -109,9 +109,12 @@ def _loss_logging_is_uncertain(probe_text: str) -> bool:
 
 
 def _downgraded_feasibility(plan: CommandPlan, issues: list[str]) -> str:
-    if any("loss" in issue.lower() or "guess" in issue.lower() for issue in issues):
+    lowered = " ".join(issues).lower()
+    if "loss" in lowered:
         return "needs_patch"
-    return "blocked"
+    if "cd, tee" in lowered or "shell log redirection" in lowered:
+        return "blocked"
+    return "needs_config"
 
 
 def _mentions_any(text: str, markers: tuple[str, ...]) -> bool:

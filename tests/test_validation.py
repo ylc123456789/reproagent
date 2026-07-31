@@ -60,6 +60,28 @@ def test_validation_accepts_explicit_budget_and_loss_logging_evidence(tmp_path):
     assert validated == plan
 
 
+def test_validation_marks_bounded_and_guess_issues_as_config_not_patch(tmp_path):
+    state = _state_with_probe(
+        tmp_path,
+        "Run a bounded GPU experiment.",
+        "--nepochs NEPOCHS\n--gpu GPU\n",
+    )
+    plan = CommandPlan(
+        stage="experiment",
+        summary="Run default training",
+        commands=["python train.py --gpu 0"],
+        assumptions=["The script likely finishes quickly."],
+        feasibility="ready_to_run",
+    )
+
+    validated = validate_experiment_plan(state, plan)
+
+    assert validated.feasibility == "needs_config"
+    assert any("bounded" in issue for issue in validated.needs_user_input)
+    assert any("guess" in issue.lower() for issue in validated.needs_user_input)
+
+
+
 def test_validation_flags_shell_logging_and_missing_budget(tmp_path):
     state = _state_with_probe(tmp_path, "Run a bounded GPU experiment.", "--gpu GPU\n")
     plan = CommandPlan(

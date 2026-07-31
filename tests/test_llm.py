@@ -46,6 +46,41 @@ def test_recent_logs_includes_environment_audit(tmp_path):
     assert "audit raw output" in logs
 
 
+def test_recent_logs_include_validation_issues_and_coding_agent_result(tmp_path):
+    from reproagent.llm import _recent_logs
+    from reproagent.models import CodingAgentResult, CommandPlan, ReproState, ReproTask, StageResult
+
+    state = ReproState(
+        task=ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path),
+    )
+    state.coding_agent_results.append(CodingAgentResult(
+        status="completed",
+        summary="Added loss logging.",
+        changed_files=["train.py"],
+    ))
+    state.experiment_attempts.append(StageResult(
+        stage="experiment",
+        attempt=1,
+        plan=CommandPlan(
+            stage="experiment",
+            summary="bad bounded plan",
+            commands=["python train.py"],
+            feasibility="needs_config",
+            needs_user_input=["Goal asks for a bounded run, but commands do not set epochs."],
+            stop_reason="Plan validation issues: missing explicit budget.",
+        ),
+        results=[],
+    ))
+
+    logs = _recent_logs(state)
+
+    assert "latest CodingAgent result" in logs
+    assert "Added loss logging" in logs
+    assert "validation/user issues" in logs
+    assert "missing explicit budget" in logs
+
+
+
 def test_plan_experiment_includes_goal_in_prompt(tmp_path, monkeypatch):
     from reproagent import llm
     from reproagent.models import RepoContext, ReproState, ReproTask

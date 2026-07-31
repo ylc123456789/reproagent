@@ -237,9 +237,25 @@ def _recent_logs(state: ReproState, max_chars: int = 12000) -> str:
             if path and path.exists():
                 text = path.read_text(encoding="utf-8", errors="replace")
                 chunks.append(f"--- {label} ---\n{text[-3000:]}\n")
+    if state.coding_agent_results:
+        latest = state.coding_agent_results[-1]
+        chunks.append("\n## latest CodingAgent result\n")
+        chunks.append(f"status={latest.status}\n")
+        if latest.summary:
+            chunks.append(f"summary={latest.summary}\n")
+        if latest.changed_files:
+            chunks.append("changed_files:\n" + "\n".join(f"- {path}" for path in latest.changed_files) + "\n")
+
     attempts = state.environment_attempts[-2:] + state.probe_attempts[-2:] + state.experiment_attempts[-2:]
     for attempt in attempts:
         chunks.append(f"\n## {attempt.stage} attempt {attempt.attempt}: {attempt.plan.summary}\n")
+        chunks.append(f"feasibility={attempt.plan.feasibility or 'unknown'}\n")
+        if attempt.plan.commands:
+            chunks.append("planned commands:\n" + "\n".join(f"- {command}" for command in attempt.plan.commands) + "\n")
+        if attempt.plan.needs_user_input:
+            chunks.append("validation/user issues:\n" + "\n".join(f"- {item}" for item in attempt.plan.needs_user_input) + "\n")
+        if attempt.plan.stop_reason:
+            chunks.append(f"stop_reason={attempt.plan.stop_reason}\n")
         for result in attempt.results[-3:]:
             chunks.append(f"$ {result.command}\nexit={result.exit_code}\n")
             for label, path in [("stdout", result.stdout_path), ("stderr", result.stderr_path)]:

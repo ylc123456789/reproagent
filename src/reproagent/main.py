@@ -166,23 +166,28 @@ def _run_stage_loop(state: ReproState, stage: str, max_attempts: int) -> bool:
 
         _print_plan(stage, attempt, plan)
         if stage == "experiment" and plan.feasibility and plan.feasibility != "ready_to_run":
-            if plan.feasibility == "needs_patch" and state.task.enable_coding_agent and not state.task.plan_only:
-                if _run_coding_agent_patch_cycle(state, plan):
-                    plan = _validated_experiment_plan(state)
-                    _print_plan(stage, attempt, plan)
-                    if plan.feasibility and plan.feasibility != "ready_to_run":
-                        _log(f"experiment not executed because plan feasibility is {plan.feasibility}")
+            if plan.feasibility == "needs_patch":
+                if state.task.enable_coding_agent and not state.task.plan_only:
+                    if _run_coding_agent_patch_cycle(state, plan):
+                        plan = _validated_experiment_plan(state)
+                        _print_plan(stage, attempt, plan)
+                    else:
                         state.experiment_attempts.append(StageResult(stage=stage, attempt=attempt, plan=plan, results=[]))
                         save_state(state)
                         return False
                 else:
+                    _log("experiment needs a code patch, but CodingAgent is disabled")
                     state.experiment_attempts.append(StageResult(stage=stage, attempt=attempt, plan=plan, results=[]))
                     save_state(state)
                     return False
-            else:
+
+            if plan.feasibility and plan.feasibility != "ready_to_run":
                 _log(f"experiment not executed because plan feasibility is {plan.feasibility}")
                 state.experiment_attempts.append(StageResult(stage=stage, attempt=attempt, plan=plan, results=[]))
                 save_state(state)
+                if _can_replan_experiment(plan, attempt, max_attempts):
+                    _log("retrying experiment planning with validation feedback")
+                    continue
                 return False
         if stage == "experiment" and state.task.confirm_before_experiment and not _confirm_experiment(plan):
             _log("experiment cancelled by user before command execution")
@@ -220,6 +225,11 @@ def _run_stage_loop(state: ReproState, stage: str, max_attempts: int) -> bool:
         if _stage_succeeded(stage, stage_result):
             return True
     return False
+
+
+
+def _can_replan_experiment(plan, attempt: int, max_attempts: int) -> bool:
+    return attempt < max_attempts and plan.feasibility == "needs_config"
 
 
 def _stage_succeeded(stage: str, stage_result: StageResult) -> bool:
