@@ -114,15 +114,28 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
 def _stream_pipe(pipe, display, log_file, chunks: list[str], stage: str) -> None:
     if pipe is None:
         return
+    pending: list[str] = []
     try:
-        for line in pipe:
-            chunks.append(line)
-            log_file.write(line)
+        while True:
+            char = pipe.read(1)
+            if char == "":
+                break
+            chunks.append(char)
+            log_file.write(char)
             log_file.flush()
-            if _should_display_line(stage, line):
-                print(line, file=display, end="", flush=True)
+            pending.append(char)
+            if char in ("\n", "\r"):
+                _display_chunk_if_relevant(stage, "".join(pending), display)
+                pending.clear()
+        if pending:
+            _display_chunk_if_relevant(stage, "".join(pending), display)
     finally:
         pipe.close()
+
+
+def _display_chunk_if_relevant(stage: str, chunk: str, display) -> None:
+    if _should_display_line(stage, chunk):
+        print(chunk, file=display, end="", flush=True)
 
 
 def _should_display_line(stage: str, line: str) -> bool:
@@ -164,6 +177,7 @@ def _command_env(workspace: Path) -> dict[str, str]:
     env["TEMP"] = str(tmp_dir)
     env["PIP_CACHE_DIR"] = str(pip_cache_dir)
     env.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
+    env.setdefault("PYTHONUNBUFFERED", "1")
     omp = env.get("OMP_NUM_THREADS", "").strip()
     if not omp.isdigit() or int(omp) <= 0:
         env["OMP_NUM_THREADS"] = "16"

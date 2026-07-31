@@ -67,6 +67,7 @@ def test_command_env_sets_workspace_cache_and_valid_omp(tmp_path, monkeypatch):
     assert env["TEMP"] == str(tmp_path / ".tmp")
     assert env["PIP_CACHE_DIR"] == str(tmp_path / ".cache" / "pip")
     assert env["OMP_NUM_THREADS"] == "16"
+    assert env["PYTHONUNBUFFERED"] == "1"
     assert (tmp_path / ".tmp").is_dir()
     assert (tmp_path / ".cache" / "pip").is_dir()
 
@@ -93,6 +94,27 @@ def test_run_one_writes_full_logs_but_only_streams_experiment_progress(tmp_path,
     assert "Epoch 1" in captured.err
     assert result.stdout_path.read_text(encoding="utf-8") == "download noise\n"
     assert result.stderr_path.read_text(encoding="utf-8") == "Epoch 1 | loss 0.5 | Test Acc 0.9\n"
+
+
+def test_stream_pipe_displays_carriage_return_experiment_progress():
+    import io
+    from reproagent import runner
+
+    class NonClosingStringIO(io.StringIO):
+        def close(self):
+            pass
+
+    pipe = NonClosingStringIO(" 42%|####      | 1/2 [00:01<00:01]\rEpoch 1 | loss 0.5 | Test Acc 0.9\n")
+    display = io.StringIO()
+    log_file = io.StringIO()
+    chunks = []
+
+    runner._stream_pipe(pipe, display, log_file, chunks, "experiment")
+
+    assert "42%" in display.getvalue()
+    assert "Epoch 1" in display.getvalue()
+    assert log_file.getvalue() == " 42%|####      | 1/2 [00:01<00:01]\rEpoch 1 | loss 0.5 | Test Acc 0.9\n"
+    assert "".join(chunks) == log_file.getvalue()
 
 
 def test_run_one_suppresses_environment_and_probe_raw_output(tmp_path, monkeypatch, capsys):

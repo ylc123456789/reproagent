@@ -87,7 +87,7 @@ def final_review(state: ReproState) -> str:
         return _mock_final_review(state)
     prompt = _base_context(state) + _recent_logs(state) + """
 
-Write a concise reproduction result summary. Explain the experiment goal, what worked, what failed, whether the goal was achieved or only partially achieved, what metrics were found, whether the run used GPU or CPU fallback, and what human input is needed next. Return plain Markdown.
+Write a concise reproduction result summary. Explain the experiment goal, what worked, what failed, whether the goal was achieved or only partially achieved, what metrics were found, whether the run used GPU or CPU fallback, and what human input is needed next. If CodingAgent changed files, explicitly describe the run as using a repo-local patch and do not claim the original code ran without modification. Return plain Markdown.
 """
     return normalize_text(_openai_compatible_text(state, prompt))
 
