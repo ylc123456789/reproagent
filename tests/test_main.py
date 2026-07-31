@@ -60,6 +60,37 @@ def test_run_parser_reads_coding_agent_options(tmp_path):
     assert args.max_coding_agent_steps == 5
 
 
+def test_final_summary_reports_ready_plan_cancelled_by_user(tmp_path, monkeypatch):
+    def fail_final_review(state):
+        raise AssertionError("LLM final review should not run when no experiment commands executed")
+
+    import reproagent.main as main_module
+
+    monkeypatch.setattr(main_module, "final_review", fail_final_review)
+    state = ReproState(
+        task=ReproTask(
+            paper_url="paper",
+            repo_url="repo",
+            workspace_dir=tmp_path,
+            experiment_goal="Run bounded MNIST.",
+        ),
+        planned_experiment=CommandPlan(
+            stage="experiment",
+            summary="Ready bounded plan.",
+            commands=["python train.py --nepochs 1"],
+            feasibility="ready_to_run",
+        ),
+    )
+    state.experiment_attempts.append(StageResult(stage="experiment", attempt=1, plan=state.planned_experiment, results=[]))
+
+    summary = _final_summary(state)
+
+    assert "Experiment plan was ready" in summary
+    assert "approve the ready experiment plan" in summary
+    assert "remaining plan validation issue" not in summary
+
+
+
 def test_final_summary_reports_blocked_coding_agent_without_llm(tmp_path, monkeypatch):
     def fail_final_review(state):
         raise AssertionError("LLM final review should not run after a blocking CodingAgent failure")

@@ -107,8 +107,9 @@ def _final_summary(state: ReproState) -> str:
 
 
 def _no_experiment_summary(state: ReproState) -> str:
+    ready_to_run = state.planned_experiment and state.planned_experiment.feasibility == "ready_to_run"
     lines = [
-        "Experiment commands were not executed, so no reproduction metrics were produced.",
+        "Experiment plan was ready, but commands were not executed." if ready_to_run else "Experiment commands were not executed, so no reproduction metrics were produced.",
     ]
     if state.planned_experiment:
         lines += [
@@ -134,7 +135,7 @@ def _no_experiment_summary(state: ReproState) -> str:
             lines += [f"CodingAgent report: {latest.report_path}"]
     lines += [
         "",
-        "Next step: fix the remaining plan validation issue or rerun with a plan that satisfies the experiment goal, then execute the experiment commands.",
+        "Next step: rerun and approve the ready experiment plan when you want to execute it." if ready_to_run else "Next step: fix the remaining plan validation issue or rerun with a plan that satisfies the experiment goal, then execute the experiment commands.",
     ]
     return normalize_text("\n".join(lines))
 
@@ -191,6 +192,8 @@ def _run_stage_loop(state: ReproState, stage: str, max_attempts: int) -> bool:
                 return False
         if stage == "experiment" and state.task.confirm_before_experiment and not _confirm_experiment(plan):
             _log("experiment cancelled by user before command execution")
+            state.experiment_attempts.append(StageResult(stage=stage, attempt=attempt, plan=plan, results=[]))
+            save_state(state)
             return False
 
         results = []

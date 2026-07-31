@@ -103,6 +103,28 @@ def test_plan_experiment_includes_goal_in_prompt(tmp_path, monkeypatch):
     assert "Experiment profile" not in captured["prompt"]
 
 
+def test_plan_environment_prompt_quotes_shell_sensitive_pip_specifiers(tmp_path, monkeypatch):
+    from reproagent import llm
+    from reproagent.models import RepoContext, ReproState, ReproTask
+
+    captured = {}
+
+    def fake_complete(state, prompt):
+        captured["prompt"] = prompt
+        return '{"stage":"environment","summary":"s","commands":[],"assumptions":[]}'
+
+    state = ReproState(
+        task=ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path),
+        repo_context=RepoContext(repo_path=tmp_path),
+    )
+    monkeypatch.setattr(llm, "_openai_compatible_text", fake_complete)
+
+    llm.plan_environment(state)
+
+    assert 'pip install "numpy<2" scipy' in captured["prompt"]
+
+
+
 def test_plan_probe_asks_for_safe_interface_discovery(tmp_path, monkeypatch):
     from reproagent import llm
     from reproagent.models import RepoContext, ReproState, ReproTask

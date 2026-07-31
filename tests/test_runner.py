@@ -174,6 +174,17 @@ def test_run_one_creates_logs_before_process_exits(tmp_path, monkeypatch):
     assert result_holder["result"].exit_code == 0
 
 
+def test_probe_allows_wc_and_py_compile():
+    ok, reason = is_safe_command("wc -l examples/odenet_mnist.py", stage="probe")
+    assert ok
+    assert reason is None
+
+    ok, reason = is_safe_command("python -m py_compile examples/odenet_mnist.py", stage="probe")
+    assert ok
+    assert reason is None
+
+
+
 def test_probe_allows_python_inline_check():
     ok, reason = is_safe_command('python3 -c "import sys; print(sys.version)"', stage="probe")
     assert ok
