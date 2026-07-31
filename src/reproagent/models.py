@@ -32,7 +32,7 @@ class ReproTask(BaseModel):
     confirm_before_experiment: bool = False
     plan_only: bool = False
     enable_coding_agent: bool = False
-    max_coding_agent_steps: int = 12
+    max_coding_agent_steps: int = 24
     mirror_profile: MirrorProfile = "none"
     mirror_strict: bool = False
 

@@ -21,9 +21,14 @@ TEXT_SUFFIXES = {
 }
 
 
-def build_repo_context(spec: CodeTaskSpec, max_files: int = 24, max_bytes: int = 12_000) -> RepoContext:
+def build_repo_context(
+    spec: CodeTaskSpec,
+    max_files: int = 24,
+    max_bytes: int = 12_000,
+    tree_limit: int = 500,
+) -> RepoContext:
     repo = spec.repo_path
-    tree = _list_tree(repo)
+    tree = _list_tree(repo, tree_limit)
     candidates = _rank_candidate_files(repo, tree, spec.task_goal)
     snippets = [_read_snippet(repo / path, path, max_bytes) for path in candidates[:max_files]]
     initial_diff = _git_diff(repo)

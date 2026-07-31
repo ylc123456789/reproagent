@@ -332,7 +332,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--confirm-before-experiment", action="store_true", help="Print the experiment plan and wait for y/N before running experiment commands")
     run.add_argument("--plan-only", action="store_true", help="Stop after probe and final experiment-plan generation; do not run experiment commands")
     run.add_argument("--enable-coding-agent", action="store_true", help="Allow CodingAgent to patch the cloned repository when validation reports needs_patch")
-    run.add_argument("--max-coding-agent-steps", type=int, default=12, help="Maximum CodingAgent controller steps per patch attempt")
+    run.add_argument("--max-coding-agent-steps", type=int, default=24, help="Maximum CodingAgent controller steps per patch attempt")
     run.add_argument("--mirror-profile", default="none", choices=["none", "cn", "autodl"], help="Preferred dependency mirror profile for LLM environment planning")
     run.add_argument("--mirror-strict", action="store_true", help="Require environment plans to stay on the selected mirror profile instead of silently falling back to official indexes")
     return parser

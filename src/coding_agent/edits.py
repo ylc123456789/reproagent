@@ -77,11 +77,17 @@ def _insert_at_anchor(
     action = "insert_before" if before else "insert_after"
     index = _resolve_match_index(text, anchor_text, relative_path, action, occurrence_index)
     if before:
+        if _inserting_at_line_boundary(text, index) and insert_text and not insert_text.endswith("\n"):
+            insert_text += "\n"
         updated = text[:index] + insert_text + text[index:]
     else:
         insert_at = index + len(anchor_text)
+        line_anchor = False
         if not anchor_text.endswith("\n") and insert_at < len(text) and text[insert_at] == "\n":
             insert_at += 1
+            line_anchor = True
+        if line_anchor and insert_text and not insert_text.endswith("\n"):
+            insert_text += "\n"
         updated = text[:insert_at] + insert_text + text[insert_at:]
     path.write_text(updated, encoding="utf-8")
     return relative_path
@@ -117,3 +123,6 @@ def find_all(text: str, needle: str) -> list[int]:
             return matches
         matches.append(index)
         start = index + max(len(needle), 1)
+
+def _inserting_at_line_boundary(text: str, index: int) -> bool:
+    return index == 0 or text[index - 1] == "\n"

@@ -16,9 +16,15 @@ class CodeTaskSpec(BaseModel):
     verify_commands: list[str] = Field(default_factory=list)
     allowed_paths: list[str] = Field(default_factory=list)
     max_iterations: int = 3
-    max_steps: int = 12
+    max_steps: int = 24
+    max_extra_steps_after_progress: int = 8
     patch_repair_attempts: int = 2
     timeout_seconds: int = 900
+    context_policy: Literal["auto"] = "auto"
+    max_context_tokens: int | None = None
+    model_context_window_tokens: int | None = None
+    context_margin_ratio: float = 0.20
+    context_output_reserve_tokens: int = 16_384
     api_base: str = "https://api.openai.com/v1"
     api_key_env: str = "OPENAI_API_KEY"
     model: str = "gpt-4.1"
@@ -46,6 +52,34 @@ class CodeTaskSpec(BaseModel):
     def max_steps_positive(cls, value: int) -> int:
         if value < 1:
             raise ValueError("max_steps must be >= 1")
+        return value
+
+    @field_validator("max_extra_steps_after_progress")
+    @classmethod
+    def max_extra_steps_after_progress_non_negative(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("max_extra_steps_after_progress must be >= 0")
+        return value
+
+    @field_validator("max_context_tokens", "model_context_window_tokens")
+    @classmethod
+    def optional_token_limits_positive(cls, value: int | None) -> int | None:
+        if value is not None and value < 8_000:
+            raise ValueError("context token limits must be >= 8000")
+        return value
+
+    @field_validator("context_margin_ratio")
+    @classmethod
+    def context_margin_ratio_valid(cls, value: float) -> float:
+        if value < 0 or value >= 0.5:
+            raise ValueError("context_margin_ratio must be >= 0 and < 0.5")
+        return value
+
+    @field_validator("context_output_reserve_tokens")
+    @classmethod
+    def context_output_reserve_tokens_positive(cls, value: int) -> int:
+        if value < 1_000:
+            raise ValueError("context_output_reserve_tokens must be >= 1000")
         return value
 
     @field_validator("patch_repair_attempts")
@@ -113,6 +147,8 @@ class ControllerAction(BaseModel):
     ]
     reasoning: str = ""
     path: str | None = None
+    start_line: int | None = None
+    end_line: int | None = None
     query: str | None = None
     command: str | None = None
     patch: str | None = None
