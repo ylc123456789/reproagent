@@ -5,3 +5,4 @@ __pycache__/
 .pytest_cache/
 runs/
 .env
+docs/DEVELOPER_HANDOFF.md

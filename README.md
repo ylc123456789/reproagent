@@ -6,14 +6,6 @@ Given a paper URL, repository URL, and concrete experiment goal, `reproagent` as
 
 This project is intentionally small. It is not a full autonomous research agent yet.
 
-## Developer Handoff
-
-For the current architecture, cloud workflow, CodingAgent boundary, known-good test target, and next development tasks, start with:
-
-```text
-docs/DEVELOPER_HANDOFF.md
-```
-
 ## Development Location
 
 Develop this project in Ubuntu-D:
@@ -163,5 +155,3 @@ automatic dataset/checkpoint management
 automatic SOTA discovery
 full benchmark/table reproduction planning
 ```
-
-See `docs/DEVELOPER_HANDOFF.md` for the latest handoff notes and recommended next work.
