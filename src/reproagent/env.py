@@ -118,7 +118,7 @@ def _is_transient_conda_setup_error(stderr: str) -> bool:
 def build_backend_command(env_name: str, command: str, conda: str | None = None) -> list[str]:
     """Wrap a plain shell command so it runs inside the task conda env."""
     conda_exe = conda or find_conda() or "conda"
-    return [conda_exe, "run", "-n", env_name, "bash", "-c", command]
+    return [conda_exe, "run", "--no-capture-output", "-n", env_name, "bash", "-c", command]
 
 
 def find_conda() -> str | None:
