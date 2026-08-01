@@ -73,6 +73,7 @@ def _run_conda_setup_with_retries(
     attempts: int = 3,
     delay_seconds: float = 3.0,
 ) -> subprocess.CompletedProcess[str]:
+    """Run conda setup commands with transient-error retries."""
     stdout_chunks: list[str] = []
     stderr_chunks: list[str] = []
     last_result: subprocess.CompletedProcess[str] | None = None
@@ -96,6 +97,7 @@ def _run_conda_setup_with_retries(
 
 
 def _is_transient_conda_setup_error(stderr: str) -> bool:
+    """Return whether conda setup failed for a transient reason."""
     lowered = stderr.lower()
     markers = (
         "condahttperror",
@@ -140,11 +142,13 @@ def find_conda() -> str | None:
 
 
 def _env_name(task_id: str) -> str:
+    """Create a unique conda environment name."""
     safe = re.sub(r"[^A-Za-z0-9_]+", "_", task_id)
     return f"repro_{safe}"[:80]
 
 
 def _find_environment_yml(repo_path: Path) -> Path | None:
+    """Find a repository-provided conda environment file."""
     for name in ("environment.yml", "environment.yaml", "conda.yml", "conda.yaml"):
         path = repo_path / name
         if path.exists():
@@ -153,6 +157,7 @@ def _find_environment_yml(repo_path: Path) -> Path | None:
 
 
 def _conda_env_exists(conda: str, env_name: str) -> bool:
+    """Return whether a conda environment already exists."""
     result = subprocess.run([conda, "env", "list", "--json"], text=True, capture_output=True, timeout=60)
     if result.returncode != 0:
         return False

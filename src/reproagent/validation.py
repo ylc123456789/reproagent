@@ -79,6 +79,7 @@ def annotate_plan_with_validation_issues(plan: CommandPlan, issues: list[str]) -
 
 
 def _has_gpu_execution_evidence(command_text: str, plan_text: str, probe_text: str) -> bool:
+    """Return whether has gpu execution evidence."""
     evidence = "\n".join([command_text, plan_text, probe_text])
     if _mentions_any(evidence, ("--gpu", "--device", "cuda", "torch.cuda", "device = torch.device", "cuda:", "gpu gpu")):
         return True
@@ -88,6 +89,7 @@ def _has_gpu_execution_evidence(command_text: str, plan_text: str, probe_text: s
 
 
 def _probe_text(state: ReproState) -> str:
+    """Collect probe evidence for validation."""
     chunks: list[str] = []
     for attempt in state.probe_attempts:
         chunks.append(attempt.plan.summary)
@@ -101,6 +103,7 @@ def _probe_text(state: ReproState) -> str:
 
 
 def _coding_agent_text(state: ReproState) -> str:
+    """Collect CodingAgent evidence for validation."""
     chunks: list[str] = []
     for result in state.coding_agent_results:
         chunks.append(result.status)
@@ -114,6 +117,7 @@ def _coding_agent_text(state: ReproState) -> str:
 
 
 def _loss_logging_is_uncertain(probe_text: str) -> bool:
+    """Return whether loss logging evidence is uncertain."""
     lines = probe_text.splitlines()
     for index, line in enumerate(lines):
         lowered = line.lower()
@@ -132,6 +136,7 @@ def _loss_logging_is_uncertain(probe_text: str) -> bool:
 
 
 def _experiment_commands_are_only_setup_or_inspection(commands: list[str]) -> bool:
+    """Return whether experiment commands are only setup or inspection."""
     meaningful = [command.strip() for command in commands if command.strip()]
     if not meaningful:
         return False
@@ -139,6 +144,7 @@ def _experiment_commands_are_only_setup_or_inspection(commands: list[str]) -> bo
 
 
 def _is_setup_or_inspection_command(command: str) -> bool:
+    """Return whether a command is setup or inspection only."""
     lowered = command.strip().lower()
     if lowered.startswith(("pip install", "python -m pip install", "python3 -m pip install", "conda install", "mamba install")):
         return True
@@ -155,6 +161,7 @@ def _is_setup_or_inspection_command(command: str) -> bool:
 
 
 def _missing_goal_entrypoint(goal: str, command_text: str) -> str | None:
+    """Find a goal entry point missing from final commands."""
     for match in re.finditer(EXPERIMENT_ENTRYPOINT_RE, goal):
         entrypoint = match.group(0).strip("`'\".,;:)")
         if entrypoint and entrypoint.lower() not in command_text:
@@ -163,6 +170,7 @@ def _missing_goal_entrypoint(goal: str, command_text: str) -> str | None:
 
 
 def _downgraded_feasibility(plan: CommandPlan, issues: list[str]) -> str:
+    """Choose feasibility after validation issues."""
     lowered = " ".join(issues).lower()
     if "loss" in lowered:
         return "needs_patch"
@@ -172,4 +180,5 @@ def _downgraded_feasibility(plan: CommandPlan, issues: list[str]) -> str:
 
 
 def _mentions_any(text: str, markers: tuple[str, ...]) -> bool:
+    """Return whether text contains any marker."""
     return any(marker in text for marker in markers)

@@ -1,3 +1,4 @@
+"""Run the step-based coding agent controller."""
 from __future__ import annotations
 
 import json
@@ -38,6 +39,7 @@ ACTION_SCHEMA = {
 
 
 class PatchRepairResponse(BaseModel):
+    """Structured response returned by patch repair prompts."""
     action: str = "apply_patch"
     patch: str | None = None
     path: str | None = None
@@ -51,6 +53,7 @@ class PatchRepairResponse(BaseModel):
     @field_validator("notes", mode="before")
     @classmethod
     def coerce_notes(cls, value):
+        """Normalize repair notes to a list of strings."""
         if value is None:
             return []
         if isinstance(value, str):
@@ -59,6 +62,7 @@ class PatchRepairResponse(BaseModel):
 
 
 def run_step_controller(spec: CodeTaskSpec) -> PatchReport:
+    """Run the controller loop until finish, failure, or budget exhaustion."""
     output_dir = prepare_output_dir(spec)
     log_dir = output_dir / "logs"
     state = AgentState(task=spec)
@@ -151,6 +155,7 @@ def run_step_controller(spec: CodeTaskSpec) -> PatchReport:
 
 
 def choose_next_action(spec: CodeTaskSpec, state: AgentState, context, client: LLMClient) -> ControllerAction:
+    """Ask the model to choose the next controller action."""
     policy = resolve_context_policy(spec)
     system = (
         "You are a coding agent controller inspired by modern agentic coding tools. "
@@ -189,6 +194,7 @@ def choose_next_action(spec: CodeTaskSpec, state: AgentState, context, client: L
 
 
 def _normalize_action(spec: CodeTaskSpec, steps: list[StepRecord], action: ControllerAction) -> ControllerAction:
+    """Fill safe missing fields before executing an action."""
     if action.action not in {"replace_text", "insert_before", "insert_after"} or action.path:
         return action
     inferred = _infer_structured_edit_path(spec, steps, action)
@@ -200,6 +206,7 @@ def _normalize_action(spec: CodeTaskSpec, steps: list[StepRecord], action: Contr
 
 
 def _infer_structured_edit_path(spec: CodeTaskSpec, steps: list[StepRecord], action: ControllerAction) -> str | None:
+    """Infer a missing structured edit path from unique text matches."""
     needle = action.old_text if action.action == "replace_text" else action.anchor_text
     if not needle:
         return None
@@ -214,6 +221,7 @@ def _infer_structured_edit_path(spec: CodeTaskSpec, steps: list[StepRecord], act
 
 
 def _recent_action_paths(steps: list[StepRecord]) -> list[str]:
+    """Return recent action paths without duplicates."""
     paths = []
     for step in reversed(steps):
         path = step.action.path
@@ -223,6 +231,7 @@ def _recent_action_paths(steps: list[StepRecord]) -> list[str]:
 
 
 def _matching_paths_for_text(spec: CodeTaskSpec, needle: str, paths: list[str]) -> list[str]:
+    """Find candidate files containing exact text."""
     matches = []
     for rel in paths:
         try:
@@ -240,6 +249,7 @@ def _matching_paths_for_text(spec: CodeTaskSpec, needle: str, paths: list[str]) 
 
 
 def _candidate_text_paths(spec: CodeTaskSpec) -> list[str]:
+    """List safe text files that may be searched for inference."""
     paths = []
     for path in sorted(spec.repo_path.rglob("*")):
         if not path.is_file():
@@ -256,6 +266,7 @@ def _candidate_text_paths(spec: CodeTaskSpec) -> list[str]:
 
 
 def execute_action(spec: CodeTaskSpec, action: ControllerAction, output_dir: Path, step: int, client: LLMClient) -> StepRecord:
+    """Execute one normalized controller action."""
     if action.action == "list_tree":
         policy = resolve_context_policy(spec)
         context = _build_context(spec, policy)
@@ -307,6 +318,7 @@ def _run_missing_finish_verification(
     output_dir: Path,
     finish_step: int,
 ):
+    """Run verification when finish follows unverified edits."""
     if not spec.verify_commands:
         return []
     last_change_step = max((step.step for step in steps if step.changed_files), default=0)
@@ -324,10 +336,12 @@ def _run_missing_finish_verification(
 
 
 def _append_observation(existing: str, addition: str) -> str:
+    """Append text to an observation string."""
     return f"{existing}\n{addition}" if existing else addition
 
 
 def _build_context(spec: CodeTaskSpec, policy: ContextPolicy):
+    """Build repository context using a resolved policy."""
     return build_repo_context(
         spec,
         max_files=policy.snippet_count,
@@ -337,6 +351,7 @@ def _build_context(spec: CodeTaskSpec, policy: ContextPolicy):
 
 
 def _should_continue_past_base_limit(spec: CodeTaskSpec, steps: list[StepRecord]) -> bool:
+    """Allow grace steps only after unverified progress."""
     if spec.max_extra_steps_after_progress <= 0:
         return False
     last_change_step = max((step.step for step in steps if step.changed_files), default=0)
@@ -347,6 +362,7 @@ def _should_continue_past_base_limit(spec: CodeTaskSpec, steps: list[StepRecord]
 
 
 def _read_file_observation(spec: CodeTaskSpec, action: ControllerAction) -> str:
+    """Read a file observation using line or size limits."""
     if not action.path:
         raise ValueError("read_file requires path")
     path = ensure_path_allowed(spec.repo_path, action.path, spec.allowed_paths or None)
@@ -361,6 +377,7 @@ def _read_file_observation(spec: CodeTaskSpec, action: ControllerAction) -> str:
 
 
 def _slice_lines(text: str, start_line: int | None, end_line: int | None) -> str:
+    """Return an inclusive 1-based line slice."""
     lines = text.splitlines(keepends=True)
     start = max((start_line or 1) - 1, 0)
     end = min(end_line or len(lines), len(lines))
@@ -370,6 +387,7 @@ def _slice_lines(text: str, start_line: int | None, end_line: int | None) -> str
 
 
 def _recent_file_observations(steps: list[StepRecord], policy: ContextPolicy | None = None) -> list[dict[str, object]]:
+    """Return recent read-file observations for prompt reuse."""
     limit = policy.recent_file_count if policy else 2
     char_limit = policy.recent_file_chars if policy else 24_000
     observations = []
@@ -392,6 +410,7 @@ def _recent_file_observations(steps: list[StepRecord], policy: ContextPolicy | N
 
 
 def _progress_hints(spec: CodeTaskSpec, steps: list[StepRecord]) -> list[str]:
+    """Build short hints that discourage stalled behavior."""
     hints = []
     if not steps:
         return hints
@@ -424,6 +443,7 @@ def _execute_structured_edit_with_repair(
     step: int,
     client: LLMClient,
 ) -> tuple[list[str], str]:
+    """Apply a structured edit with repair attempts."""
     errors: list[str] = []
     current = action
     max_attempts = spec.patch_repair_attempts + 1
@@ -453,6 +473,7 @@ def repair_structured_edit(
     attempt: int,
     client: LLMClient,
 ) -> ControllerAction:
+    """Ask the model to repair a failed structured edit."""
     match_context = _structured_edit_match_context(spec, failed_action)
     _save_structured_edit_context(output_dir, step, attempt, match_context)
     system = (
@@ -486,6 +507,7 @@ def repair_structured_edit(
 
 
 def _structured_edit_match_context(spec: CodeTaskSpec, action: ControllerAction) -> dict[str, object]:
+    """Build match context for structured edit repair."""
     if not action.path:
         return {"error": "structured edit has no path"}
     try:
@@ -511,6 +533,7 @@ def _structured_edit_match_context(spec: CodeTaskSpec, action: ControllerAction)
 
 
 def _match_window(text: str, index: int, length: int, occurrence: int) -> dict[str, object]:
+    """Return line and context window for a text match."""
     line_start = text.count("\n", 0, index) + 1
     line_end = line_start + text[index : index + length].count("\n")
     before_start = _nth_previous_line_start(text, index, 4)
@@ -524,6 +547,7 @@ def _match_window(text: str, index: int, length: int, occurrence: int) -> dict[s
 
 
 def _nth_previous_line_start(text: str, index: int, line_count: int) -> int:
+    """Find the start index several lines before a point."""
     cursor = index
     for _ in range(line_count):
         previous = text.rfind("\n", 0, max(cursor - 1, 0))
@@ -534,6 +558,7 @@ def _nth_previous_line_start(text: str, index: int, line_count: int) -> int:
 
 
 def _nth_next_line_end(text: str, index: int, line_count: int) -> int:
+    """Find the end index several lines after a point."""
     cursor = index
     for _ in range(line_count):
         next_newline = text.find("\n", cursor)
@@ -551,6 +576,7 @@ def _save_structured_edit_failure(
     action: ControllerAction,
     error: str,
 ) -> None:
+    """Persist a failed structured edit action."""
     logs = output_dir / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     payload = {"action": action.model_dump(), "error": error, "allowed_paths": spec.allowed_paths}
@@ -560,6 +586,7 @@ def _save_structured_edit_failure(
 
 
 def _save_structured_edit_context(output_dir: Path, step: int, attempt: int, context: dict[str, object]) -> None:
+    """Persist context used for structured edit repair."""
     logs = output_dir / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     (logs / f"structured_edit_context_{step:02d}_{attempt:02d}.json").write_text(
@@ -568,6 +595,7 @@ def _save_structured_edit_context(output_dir: Path, step: int, attempt: int, con
 
 
 def _save_structured_edit_response(output_dir: Path, step: int, attempt: int, action: ControllerAction) -> None:
+    """Persist the repaired structured edit action."""
     logs = output_dir / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     (logs / f"structured_edit_response_{step:02d}_{attempt:02d}.json").write_text(
@@ -575,6 +603,7 @@ def _save_structured_edit_response(output_dir: Path, step: int, attempt: int, ac
     )
 
 def _execute_structured_edit(spec: CodeTaskSpec, action: ControllerAction, output_dir: Path) -> tuple[list[str], str]:
+    """Apply one structured edit action."""
     if not action.path:
         raise ValueError(f"{action.action} requires path")
     if action.action == "replace_text":
@@ -602,6 +631,7 @@ def _apply_patch_with_repair(
     step: int,
     client: LLMClient,
 ) -> tuple[list[str], str]:
+    """Apply a patch, repairing it when possible."""
     patch = normalize_patch_text(patch_text)
     errors: list[str] = []
     repair_notes: list[str] = []
@@ -656,6 +686,7 @@ def repair_patch(
     attempt: int,
     client: LLMClient,
 ) -> PatchRepairResponse:
+    """Ask the model to repair a failed patch."""
     paths = extract_patch_paths(failed_patch)
     file_context = []
     for rel in paths[:6]:
@@ -696,6 +727,7 @@ def repair_patch(
 
 
 def _save_failed_patch(output_dir: Path, step: int, attempt: int, patch: str, stderr: str) -> None:
+    """Persist a failed patch and error text."""
     logs = output_dir / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     stem = f"failed_patch_{step:02d}_{attempt:02d}"
@@ -704,6 +736,7 @@ def _save_failed_patch(output_dir: Path, step: int, attempt: int, patch: str, st
 
 
 def _save_repair_context(output_dir: Path, step: int, attempt: int, file_context: list[dict[str, str]]) -> None:
+    """Persist file context used for patch repair."""
     logs = output_dir / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     path = logs / f"repair_context_{step:02d}_{attempt:02d}.json"
@@ -711,6 +744,7 @@ def _save_repair_context(output_dir: Path, step: int, attempt: int, file_context
 
 
 def _save_repair_response(output_dir: Path, step: int, attempt: int, response: PatchRepairResponse) -> None:
+    """Persist the model patch repair response."""
     logs = output_dir / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     path = logs / f"repair_response_{step:02d}_{attempt:02d}.json"
@@ -718,6 +752,7 @@ def _save_repair_response(output_dir: Path, step: int, attempt: int, response: P
 
 
 def _search_repo(repo: Path, query: str, limit: int = 80) -> str:
+    """Search safe text files for a query string."""
     matches: list[str] = []
     lowered = query.lower()
     for path in sorted(repo.rglob("*")):
@@ -740,6 +775,7 @@ def _search_repo(repo: Path, query: str, limit: int = 80) -> str:
 
 
 def _compact_step(step: StepRecord, policy: ContextPolicy | None = None) -> dict[str, object]:
+    """Compact a step record for the next prompt."""
     observation_chars = policy.step_observation_chars if policy else 2_000
     return {
         "step": step.step,
@@ -756,6 +792,7 @@ def _compact_step(step: StepRecord, policy: ContextPolicy | None = None) -> dict
 
 
 def _final_status(requested_status: str | None, changed_files: list[str], verification_results, verification_required: bool) -> str:
+    """Combine requested finish status with verification evidence."""
     evidence_status = _status_from_verification(changed_files, verification_results)
     if requested_status == "completed" and verification_required and evidence_status != "completed":
         return evidence_status
@@ -763,6 +800,7 @@ def _final_status(requested_status: str | None, changed_files: list[str], verifi
 
 
 def _status_from_verification(changed_files: list[str], verification_results) -> str:
+    """Infer status from changed files and verification results."""
     if not changed_files:
         return "failed"
     if verification_results and all(result.succeeded for result in verification_results):

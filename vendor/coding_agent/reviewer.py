@@ -1,3 +1,4 @@
+"""Convert edit and verification evidence into a final report."""
 from __future__ import annotations
 
 from .models import CodeTaskSpec, CommandResult, PatchReport
@@ -10,6 +11,7 @@ def review_outcome(
     verification_results: list[CommandResult],
     residual_risks: list[str] | None = None,
 ) -> PatchReport:
+    """Review changes and verification into a report."""
     residual = list(residual_risks or [])
     if not changed_files:
         return PatchReport(

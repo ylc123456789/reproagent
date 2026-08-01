@@ -88,16 +88,19 @@ def normalize_text(text: str | None) -> str:
 
 
 def normalize_plan_text(text: str | None) -> str | None:
+    """Normalize normalize plan text."""
     if text is None:
         return None
     return normalize_text(text)
 
 
 def normalize_text_list(items: list[str]) -> list[str]:
+    """Normalize normalize text list."""
     return [normalize_text(item) for item in items]
 
 
 def _best_mojibake_repair(text: str) -> str:
+    """Choose the best common mojibake repair."""
     candidates = [text]
     for encoding in ("latin1", "cp1252", "gb18030"):
         try:
@@ -108,5 +111,6 @@ def _best_mojibake_repair(text: str) -> str:
 
 
 def _mojibake_score(text: str) -> int:
+    """Score text for likely mojibake artifacts."""
     markers = ("鈥", "檚", "慳", "慛", "憇", "憆", "â", "Ã", "�")
     return sum(text.count(marker) for marker in markers)

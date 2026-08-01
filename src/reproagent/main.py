@@ -18,10 +18,12 @@ from .validation import annotate_plan_with_validation_issues, validate_experimen
 
 
 def _log(message: str) -> None:
+    """Print a prefixed workflow log message."""
     print(f"[reproagent] {message}", flush=True)
 
 
 def run_task(task: ReproTask) -> ReproState:
+    """Run the full reproduction workflow for a task."""
     task.workspace_dir.mkdir(parents=True, exist_ok=True)
     state = ReproState(task=task, status="started")
     save_state(state)
@@ -73,6 +75,7 @@ def run_task(task: ReproTask) -> ReproState:
 
 
 def _final_summary(state: ReproState) -> str:
+    """Build the final workflow summary."""
     blocked_result = _blocking_coding_agent_result(state)
     no_experiment_results = not any(attempt.results for attempt in state.experiment_attempts)
     if no_experiment_results:
@@ -108,6 +111,7 @@ def _final_summary(state: ReproState) -> str:
 
 
 def _no_experiment_summary(state: ReproState) -> str:
+    """Explain why formal experiment commands did not run."""
     ready_to_run = state.planned_experiment and state.planned_experiment.feasibility == "ready_to_run"
     lines = [
         "Experiment plan was ready, but commands were not executed." if ready_to_run else "Experiment commands were not executed, so no reproduction metrics were produced.",
@@ -142,6 +146,7 @@ def _no_experiment_summary(state: ReproState) -> str:
 
 
 def _blocking_coding_agent_result(state: ReproState):
+    """Return a CodingAgent result that blocks execution."""
     if not state.coding_agent_results:
         return None
     latest = state.coding_agent_results[-1]
@@ -152,6 +157,7 @@ def _blocking_coding_agent_result(state: ReproState):
 
 
 def _run_stage_loop(state: ReproState, stage: str, max_attempts: int) -> bool:
+    """Run planning, execution, validation, and retry for a stage."""
     assert state.repo_context is not None
     assert state.environment is not None
     for attempt in range(1, max_attempts + 1):
@@ -235,10 +241,12 @@ def _run_stage_loop(state: ReproState, stage: str, max_attempts: int) -> bool:
 
 
 def _can_replan_experiment(plan, attempt: int, max_attempts: int) -> bool:
+    """Return whether experiment validation should trigger another plan."""
     return attempt < max_attempts and plan.feasibility == "needs_config"
 
 
 def _stage_succeeded(stage: str, stage_result: StageResult) -> bool:
+    """Return whether a stage attempt succeeded."""
     if not stage_result.plan.commands:
         return True
     if stage == "probe":
@@ -247,6 +255,7 @@ def _stage_succeeded(stage: str, stage_result: StageResult) -> bool:
 
 
 def _validated_experiment_plan(state: ReproState):
+    """Generate and validate a fresh experiment plan."""
     plan = plan_experiment(state)
     validated = _validate_experiment_plan(state, plan)
     state.planned_experiment = validated
@@ -254,6 +263,7 @@ def _validated_experiment_plan(state: ReproState):
 
 
 def _validate_experiment_plan(state: ReproState, plan):
+    """Apply hard and semantic experiment-plan validation."""
     validated = validate_experiment_plan(state, plan)
     if validated is plan and validated.feasibility == "ready_to_run":
         try:
@@ -269,6 +279,7 @@ def _validate_experiment_plan(state: ReproState, plan):
 
 
 def _run_coding_agent_patch_cycle(state: ReproState, plan) -> bool:
+    """Run CodingAgent and re-probe after a successful patch."""
     _log("running CodingAgent to resolve patch-required validation issues")
     try:
         result = run_coding_agent_for_patch(state, plan)
@@ -287,6 +298,7 @@ def _run_coding_agent_patch_cycle(state: ReproState, plan) -> bool:
 
 
 def _run_probe_once_after_patch(state: ReproState) -> bool:
+    """Run one probe attempt after CodingAgent modifies the repo."""
     assert state.repo_context is not None
     assert state.environment is not None
     attempt = len(state.probe_attempts) + 1
@@ -310,6 +322,7 @@ def _run_probe_once_after_patch(state: ReproState) -> bool:
 
 
 def _print_plan(stage: str, attempt: int, plan) -> None:
+    """Print print plan."""
     _log(f"{stage} attempt {attempt} plan: {plan.summary or 'no summary'}")
     if plan.feasibility:
         _log(f"feasibility: {plan.feasibility}")
@@ -332,6 +345,7 @@ def _print_plan(stage: str, attempt: int, plan) -> None:
 
 
 def _confirm_experiment(plan) -> bool:
+    """Confirm confirm experiment."""
     if not plan.commands:
         return True
     try:
@@ -342,6 +356,7 @@ def _confirm_experiment(plan) -> bool:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the reproagent command-line parser."""
     parser = argparse.ArgumentParser(description="LLM-first ML paper repo reproduction runner")
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run")
@@ -370,6 +385,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Parse CLI arguments and dispatch the requested command."""
     args = build_parser().parse_args(argv)
     if args.command == "run":
         codingagent_path = None

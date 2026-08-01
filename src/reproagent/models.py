@@ -11,10 +11,12 @@ MirrorProfile = Literal["none", "cn", "autodl"]
 from pydantic import BaseModel, Field
 
 def _task_id() -> str:
+    """Create a short unique task identifier."""
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return f"repro-{stamp}-{uuid.uuid4().hex[:6]}"
 
 class ReproTask(BaseModel):
+    """Represent ReproTask data."""
     paper_url: str
     repo_url: str
     workspace_dir: Path
@@ -39,6 +41,7 @@ class ReproTask(BaseModel):
     mirror_strict: bool = False
 
 class RepoContext(BaseModel):
+    """Represent RepoContext data."""
     repo_path: Path
     commit_hash: str | None = None
     file_tree: str = ""
@@ -48,6 +51,7 @@ class RepoContext(BaseModel):
     summary_path: Path | None = None
 
 class EnvironmentInfo(BaseModel):
+    """Represent EnvironmentInfo data."""
     backend: Literal["conda"] = "conda"
     env_name: str
     created: bool = False
@@ -57,6 +61,7 @@ class EnvironmentInfo(BaseModel):
     setup_stderr_path: Path | None = None
 
 class EnvironmentAudit(BaseModel):
+    """Represent EnvironmentAudit data."""
     success: bool
     summary: str
     details: list[str] = Field(default_factory=list)
@@ -66,6 +71,7 @@ class EnvironmentAudit(BaseModel):
     stderr_path: Path | None = None
 
 class CommandPlan(BaseModel):
+    """Represent CommandPlan data."""
     stage: StageName
     summary: str
     commands: list[str] = Field(default_factory=list)
@@ -76,6 +82,7 @@ class CommandPlan(BaseModel):
     stop_reason: str | None = None
 
 class CommandResult(BaseModel):
+    """Represent CommandResult data."""
     command: str
     exit_code: int
     stdout_path: Path
@@ -84,18 +91,22 @@ class CommandResult(BaseModel):
     backend_command: list[str] = Field(default_factory=list)
     @property
     def success(self) -> bool:
+        """Return whether the result succeeded."""
         return self.exit_code == 0
 
 class StageResult(BaseModel):
+    """Represent StageResult data."""
     stage: StageName
     attempt: int
     plan: CommandPlan
     results: list[CommandResult] = Field(default_factory=list)
     @property
     def success(self) -> bool:
+        """Return whether the result succeeded."""
         return bool(self.results) and all(r.success for r in self.results)
 
 class CodingAgentResult(BaseModel):
+    """Represent CodingAgentResult data."""
     status: str
     summary: str = ""
     changed_files: list[str] = Field(default_factory=list)
@@ -108,6 +119,7 @@ class CodingAgentResult(BaseModel):
 
 
 class ReproState(BaseModel):
+    """Represent ReproState data."""
     task: ReproTask
     status: str = "created"
     repo_context: RepoContext | None = None

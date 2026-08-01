@@ -1,3 +1,4 @@
+"""Run verification commands and capture their logs."""
 from __future__ import annotations
 
 import subprocess
@@ -14,6 +15,7 @@ def run_verify_commands(
     log_dir: Path,
     timeout_seconds: int,
 ) -> list[CommandResult]:
+    """Run verification commands with captured logs."""
     log_dir.mkdir(parents=True, exist_ok=True)
     results: list[CommandResult] = []
     for index, command in enumerate(commands, start=1):

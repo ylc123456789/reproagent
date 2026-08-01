@@ -139,12 +139,14 @@ def audit_environment(state: ReproState) -> EnvironmentAudit:
     )
 
 def _gpu_visible(state: ReproState) -> bool:
+    """Return whether CUDA appears visible in audit output."""
     if not state.repo_context:
         return False
     hardware = state.repo_context.hardware_text.lower()
     return "gpu 0:" in hardware or ("nvidia-smi:" in hardware and "not available" not in hardware)
 
 def _infer_env_prefix(sys_prefix: str, executable: str) -> Path:
+    """Infer the current conda environment prefix."""
     if sys_prefix:
         return Path(sys_prefix)
     executable_path = Path(executable)
@@ -153,6 +155,7 @@ def _infer_env_prefix(sys_prefix: str, executable: str) -> Path:
     return Path("")
 
 def _path_is_under(path: str, parent: Path) -> bool:
+    """Return whether a path resolves under a parent directory."""
     if not path or not str(parent):
         return False
     try:

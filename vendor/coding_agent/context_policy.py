@@ -1,3 +1,4 @@
+"""Choose context packing limits from model capabilities."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -19,9 +20,9 @@ MODEL_CONTEXT_WINDOWS = {
 
 @dataclass(frozen=True)
 class ContextPolicy:
+    """Resolved limits for packing prompt context."""
     context_window_tokens: int
     input_budget_tokens: int
-    char_budget: int
     repo_tree_limit: int
     snippet_count: int
     snippet_chars: int
@@ -33,18 +34,16 @@ class ContextPolicy:
 
 
 def resolve_context_policy(spec: CodeTaskSpec) -> ContextPolicy:
+    """Resolve prompt context limits for a task spec."""
     window = spec.model_context_window_tokens or _model_context_window(spec.model)
     reserved = max(spec.context_output_reserve_tokens, int(window * spec.context_margin_ratio))
     input_budget = max(8_000, window - reserved)
     if spec.max_context_tokens is not None:
         input_budget = min(input_budget, spec.max_context_tokens)
-    char_budget = input_budget * 4
-
     scale = _scale(input_budget)
     return ContextPolicy(
         context_window_tokens=window,
         input_budget_tokens=input_budget,
-        char_budget=char_budget,
         repo_tree_limit=min(2_000, max(300, 300 + scale * 250)),
         snippet_count=min(64, max(8, 8 + scale * 8)),
         snippet_chars=min(64_000, max(12_000, 12_000 + scale * 8_000)),
@@ -57,11 +56,13 @@ def resolve_context_policy(spec: CodeTaskSpec) -> ContextPolicy:
 
 
 def _model_context_window(model: str) -> int:
+    """Look up the context window for a model name."""
     normalized = model.lower().split("/")[-1]
     return MODEL_CONTEXT_WINDOWS.get(normalized, DEFAULT_CONTEXT_WINDOW_TOKENS)
 
 
 def _scale(input_budget_tokens: int) -> int:
+    """Map an input token budget to a small scaling tier."""
     if input_budget_tokens >= 700_000:
         return 5
     if input_budget_tokens >= 350_000:

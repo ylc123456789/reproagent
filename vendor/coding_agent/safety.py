@@ -1,3 +1,4 @@
+"""Enforce path and command safety constraints."""
 from __future__ import annotations
 
 import shlex
@@ -35,10 +36,12 @@ BLOCKED_SUFFIXES = {
 
 
 class SafetyError(ValueError):
+    """Raised when a path or command violates safety policy."""
     pass
 
 
 def ensure_repo_relative(path: str) -> str:
+    """Resolve and validate a repository-relative path."""
     normalized = path.replace("\\", "/")
     if normalized.startswith("/"):
         raise SafetyError(f"absolute paths are not allowed in patches: {path}")
@@ -48,6 +51,7 @@ def ensure_repo_relative(path: str) -> str:
 
 
 def ensure_path_allowed(repo_root: Path, relative_path: str, allowed_paths: list[str] | None = None) -> Path:
+    """Validate a path against safety and allow-list rules."""
     safe_rel = ensure_repo_relative(relative_path)
     parts = set(Path(safe_rel).parts)
     suffix = Path(safe_rel).suffix.lower()
@@ -66,6 +70,7 @@ def ensure_path_allowed(repo_root: Path, relative_path: str, allowed_paths: list
 
 
 def validate_command(command: str) -> None:
+    """Reject dangerous shell commands."""
     lowered = command.lower()
     blocked_fragments = [
         "rm -rf",

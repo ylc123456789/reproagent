@@ -1,3 +1,4 @@
+"""Define shared data models for tasks, actions, state, and reports."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -8,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CodeTaskSpec(BaseModel):
+    """Configuration for one coding agent run."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     repo_path: Path
@@ -15,12 +17,10 @@ class CodeTaskSpec(BaseModel):
     constraints: list[str] = Field(default_factory=list)
     verify_commands: list[str] = Field(default_factory=list)
     allowed_paths: list[str] = Field(default_factory=list)
-    max_iterations: int = 3
     max_steps: int = 24
     max_extra_steps_after_progress: int = 8
     patch_repair_attempts: int = 2
     timeout_seconds: int = 900
-    context_policy: Literal["auto"] = "auto"
     max_context_tokens: int | None = None
     model_context_window_tokens: int | None = None
     context_margin_ratio: float = 0.20
@@ -33,6 +33,7 @@ class CodeTaskSpec(BaseModel):
     @field_validator("repo_path")
     @classmethod
     def repo_path_must_exist(cls, value: Path) -> Path:
+        """Validate that the repository path exists."""
         resolved = value.expanduser().resolve()
         if not resolved.exists():
             raise ValueError(f"repo_path does not exist: {resolved}")
@@ -40,16 +41,10 @@ class CodeTaskSpec(BaseModel):
             raise ValueError(f"repo_path is not a directory: {resolved}")
         return resolved
 
-    @field_validator("max_iterations")
-    @classmethod
-    def max_iterations_positive(cls, value: int) -> int:
-        if value < 1:
-            raise ValueError("max_iterations must be >= 1")
-        return value
-
     @field_validator("max_steps")
     @classmethod
     def max_steps_positive(cls, value: int) -> int:
+        """Validate that the base step budget is positive."""
         if value < 1:
             raise ValueError("max_steps must be >= 1")
         return value
@@ -57,6 +52,7 @@ class CodeTaskSpec(BaseModel):
     @field_validator("max_extra_steps_after_progress")
     @classmethod
     def max_extra_steps_after_progress_non_negative(cls, value: int) -> int:
+        """Validate the grace step budget."""
         if value < 0:
             raise ValueError("max_extra_steps_after_progress must be >= 0")
         return value
@@ -64,6 +60,7 @@ class CodeTaskSpec(BaseModel):
     @field_validator("max_context_tokens", "model_context_window_tokens")
     @classmethod
     def optional_token_limits_positive(cls, value: int | None) -> int | None:
+        """Validate optional context token limits."""
         if value is not None and value < 8_000:
             raise ValueError("context token limits must be >= 8000")
         return value
@@ -71,6 +68,7 @@ class CodeTaskSpec(BaseModel):
     @field_validator("context_margin_ratio")
     @classmethod
     def context_margin_ratio_valid(cls, value: float) -> float:
+        """Validate the context margin fraction."""
         if value < 0 or value >= 0.5:
             raise ValueError("context_margin_ratio must be >= 0 and < 0.5")
         return value
@@ -78,6 +76,7 @@ class CodeTaskSpec(BaseModel):
     @field_validator("context_output_reserve_tokens")
     @classmethod
     def context_output_reserve_tokens_positive(cls, value: int) -> int:
+        """Validate output token reserve."""
         if value < 1_000:
             raise ValueError("context_output_reserve_tokens must be >= 1000")
         return value
@@ -85,41 +84,29 @@ class CodeTaskSpec(BaseModel):
     @field_validator("patch_repair_attempts")
     @classmethod
     def patch_repair_attempts_non_negative(cls, value: int) -> int:
+        """Validate patch repair attempt count."""
         if value < 0:
             raise ValueError("patch_repair_attempts must be >= 0")
         return value
 
 
 class FileSnippet(BaseModel):
+    """Small text excerpt from a repository file."""
     path: str
     text: str
     truncated: bool = False
 
 
 class RepoContext(BaseModel):
+    """Snapshot of repository tree, snippets, and initial diff."""
     repo_path: Path
     tree: list[str]
     snippets: list[FileSnippet]
     initial_diff: str = ""
 
 
-class EditPlan(BaseModel):
-    summary: str
-    target_files: list[str]
-    allowed_edit_type: Literal[
-        "logging_only",
-        "config_only",
-        "bugfix",
-        "new_file",
-        "general",
-    ] = "general"
-    risks: list[str] = Field(default_factory=list)
-    verification: list[str] = Field(default_factory=list)
-    needs_user_input: list[str] = Field(default_factory=list)
-    feasibility: Literal["ready_to_edit", "needs_context", "blocked", "unsafe"]
-
-
 class CommandResult(BaseModel):
+    """Result metadata for one verification command."""
     command: str
     returncode: int
     stdout_path: Path
@@ -129,10 +116,12 @@ class CommandResult(BaseModel):
 
     @property
     def succeeded(self) -> bool:
+        """Return whether the command completed successfully."""
         return self.returncode == 0 and not self.timed_out
 
 
 class ControllerAction(BaseModel):
+    """One model-selected controller action."""
     action: Literal[
         "list_tree",
         "read_file",
@@ -163,6 +152,7 @@ class ControllerAction(BaseModel):
 
 
 class StepRecord(BaseModel):
+    """Recorded outcome of one controller step."""
     step: int
     action: ControllerAction
     observation: str
@@ -171,16 +161,8 @@ class StepRecord(BaseModel):
     error: str | None = None
 
 
-class PatchAttempt(BaseModel):
-    iteration: int
-    plan: EditPlan | None = None
-    patch_text: str = ""
-    applied: bool = False
-    error: str | None = None
-    verification_results: list[CommandResult] = Field(default_factory=list)
-
-
 class PatchReport(BaseModel):
+    """Final user-facing outcome of a coding task."""
     status: Literal["completed", "failed", "blocked", "needs_user_input"]
     changed_files: list[str]
     diff_path: Path | None
@@ -190,8 +172,8 @@ class PatchReport(BaseModel):
 
 
 class AgentState(BaseModel):
+    """Persisted state for an agent run."""
     task: CodeTaskSpec
     started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    attempts: list[PatchAttempt] = Field(default_factory=list)
     steps: list[StepRecord] = Field(default_factory=list)
     report: PatchReport | None = None

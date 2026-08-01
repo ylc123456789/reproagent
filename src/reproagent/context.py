@@ -15,6 +15,7 @@ CLONE_TIMEOUT_SECONDS = 300
 
 
 def clone_repo(task: ReproTask) -> Path:
+    """Clone or reuse the target repository checkout for a run."""
     repo_path = task.workspace_dir / "repo"
     log_dir = task.workspace_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -40,6 +41,7 @@ def clone_repo(task: ReproTask) -> Path:
 
 
 def collect_context(task: ReproTask) -> RepoContext:
+    """Collect repository, hardware, paper, and README context for planning."""
     repo_path = clone_repo(task)
     commit = _git_commit(repo_path)
     file_tree = _file_tree(repo_path)
@@ -91,6 +93,7 @@ Commit: `{commit or 'unknown'}`
 
 
 def _run_clone(repo_url: str, repo_path: Path) -> subprocess.CompletedProcess[str]:
+    """Run git clone and capture its output."""
     try:
         return subprocess.run(
             ["git", "clone", "--depth", "1", "--single-branch", repo_url, str(repo_path)],
@@ -106,6 +109,7 @@ def _run_clone(repo_url: str, repo_path: Path) -> subprocess.CompletedProcess[st
 
 
 def _write_clone_logs(log_dir: Path, result: subprocess.CompletedProcess[str], attempt: int) -> None:
+    """Write write clone logs."""
     stdout = result.stdout or ""
     stderr = result.stderr or ""
     (log_dir / f"clone_{attempt:02d}.stdout").write_text(stdout, encoding="utf-8", errors="replace")
@@ -115,6 +119,7 @@ def _write_clone_logs(log_dir: Path, result: subprocess.CompletedProcess[str], a
 
 
 def _is_usable_repo(repo_path: Path) -> bool:
+    """Return whether a path is a usable git worktree."""
     if not repo_path.exists() or not repo_path.is_dir():
         return False
     if not _has_worktree_files(repo_path):
@@ -126,6 +131,7 @@ def _is_usable_repo(repo_path: Path) -> bool:
 
 
 def _has_worktree_files(repo_path: Path) -> bool:
+    """Return whether has worktree files."""
     try:
         children = [path for path in repo_path.iterdir() if path.name != ".git"]
     except OSError:
@@ -139,11 +145,13 @@ def _has_worktree_files(repo_path: Path) -> bool:
 
 
 def _remove_path(path: Path) -> None:
+    """Remove a stale clone target."""
     if path.exists():
         shutil.rmtree(path)
 
 
 def _git_commit(repo_path: Path) -> str | None:
+    """Return the current repository commit hash."""
     result = subprocess.run(
         ["git", "-C", str(repo_path), "rev-parse", "HEAD"],
         text=True,
@@ -154,6 +162,7 @@ def _git_commit(repo_path: Path) -> str | None:
 
 
 def _file_tree(repo_path: Path, limit: int = 250) -> str:
+    """Build a compact repository file tree excerpt."""
     ignored = {".git", "__pycache__", ".venv", "venv", "env", "site-packages"}
     lines: list[str] = []
     for path in sorted(repo_path.rglob("*")):
@@ -169,6 +178,7 @@ def _file_tree(repo_path: Path, limit: int = 250) -> str:
 
 
 def _read_readmes(repo_path: Path) -> str:
+    """Read read readmes."""
     names = ["README.md", "README.rst", "README.txt", "readme.md"]
     chunks: list[str] = []
     for name in names:

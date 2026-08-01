@@ -1,3 +1,4 @@
+"""Validate, normalize, and apply unified diff patches."""
 from __future__ import annotations
 
 import re
@@ -10,12 +11,15 @@ DIFF_PATH_RE = re.compile(r"^(?:---|\+\+\+) (?:a/|b/)?(.+)$")
 
 
 class PatchApplyError(RuntimeError):
+    """Raised when a patch fails validation or application."""
     def __init__(self, message: str, stderr: str = "") -> None:
+        """Handle   init  ."""
         super().__init__(message)
         self.stderr = stderr
 
 
 def normalize_patch_text(patch_text: str) -> str:
+    """Normalize model-provided patch text before validation."""
     text = patch_text.strip()
     if text.startswith("```"):
         lines = text.splitlines()
@@ -28,6 +32,7 @@ def normalize_patch_text(patch_text: str) -> str:
 
 
 def extract_patch_paths(patch_text: str) -> list[str]:
+    """Return touched file paths from a unified diff."""
     paths: list[str] = []
     for line in normalize_patch_text(patch_text).splitlines():
         match = DIFF_PATH_RE.match(line)
@@ -41,6 +46,7 @@ def extract_patch_paths(patch_text: str) -> list[str]:
 
 
 def validate_patch(repo_root: Path, patch_text: str, allowed_paths: list[str] | None = None) -> list[str]:
+    """Reject patches that touch disallowed paths."""
     normalized = normalize_patch_text(patch_text)
     if not normalized.strip():
         raise PatchApplyError("empty patch")
@@ -53,6 +59,7 @@ def validate_patch(repo_root: Path, patch_text: str, allowed_paths: list[str] | 
 
 
 def check_patch_text(repo_root: Path, patch_text: str, allowed_paths: list[str] | None = None) -> list[str]:
+    """Check whether git can apply a patch cleanly."""
     normalized = normalize_patch_text(patch_text)
     changed_paths = validate_patch(repo_root, normalized, allowed_paths)
     result = subprocess.run(
@@ -69,6 +76,7 @@ def check_patch_text(repo_root: Path, patch_text: str, allowed_paths: list[str] 
 
 
 def apply_patch_text(repo_root: Path, patch_text: str, allowed_paths: list[str] | None = None) -> list[str]:
+    """Apply a checked unified diff to the repository."""
     normalized = normalize_patch_text(patch_text)
     changed_paths = check_patch_text(repo_root, normalized, allowed_paths)
     result = subprocess.run(
@@ -85,6 +93,7 @@ def apply_patch_text(repo_root: Path, patch_text: str, allowed_paths: list[str] 
 
 
 def current_diff(repo_root: Path) -> str:
+    """Return the current git diff for a repository."""
     result = subprocess.run(
         ["git", "diff", "--no-ext-diff"],
         cwd=repo_root,

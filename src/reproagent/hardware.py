@@ -33,6 +33,7 @@ def collect_hardware_text(timeout: int = 20) -> str:
 
 
 def _memory_summary() -> str | None:
+    """Return a short system memory summary."""
     try:
         with open("/proc/meminfo", "r", encoding="utf-8") as f:
             data = f.read().splitlines()
@@ -54,6 +55,7 @@ def _memory_summary() -> str | None:
 
 
 def _nvidia_smi(timeout: int) -> str | None:
+    """Return nvidia-smi output when available."""
     exe = shutil.which("nvidia-smi") or "/usr/lib/wsl/lib/nvidia-smi"
     if not exe or not os.path.exists(exe):
         return None

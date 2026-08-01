@@ -15,6 +15,7 @@ BLOCKED_SNIPPETS = ["sudo", "rm -rf", "| bash", "> /", "shutdown", "reboot", "co
 
 
 def is_safe_command(command: str, stage: str | None = None) -> tuple[bool, str | None]:
+    """Return whether a command is allowed by the runner safety policy."""
     lowered = command.lower()
     for bad in BLOCKED_SNIPPETS:
         if bad in lowered:
@@ -27,10 +28,12 @@ def is_safe_command(command: str, stage: str | None = None) -> tuple[bool, str |
 
 
 def _normalize_command(command: str) -> str:
+    """Normalize normalize command."""
     return command.replace(".**version**", ".__version__")
 
 
 def _is_probe_command(command: str) -> bool:
+    """Return whether a command is safe probe-only inspection."""
     lowered = command.strip().lower()
     if "--help" in lowered or lowered.endswith(" -h") or " -h " in lowered:
         return True
@@ -41,12 +44,14 @@ def _is_probe_command(command: str) -> bool:
 
 
 def _has_parent_directory_traversal(command: str) -> bool:
+    """Return whether has parent directory traversal."""
     normalized = command.replace("\\", "/")
     tokens = normalized.split()
     return any(token == ".." or token.startswith("../") or "/../" in token for token in tokens)
 
 
 def run_commands(commands: list[str], cwd: Path, workspace: Path, stage: str, attempt: int, timeout: int, env_name: str) -> list[CommandResult]:
+    """Run a list of commands and collect their results."""
     results: list[CommandResult] = []
     for index, command in enumerate(commands, start=1):
         ok, reason = is_safe_command(command, stage=stage)
@@ -58,6 +63,7 @@ def run_commands(commands: list[str], cwd: Path, workspace: Path, stage: str, at
 
 
 def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int, index: int, timeout: int, env_name: str) -> CommandResult:
+    """Run one command with logging, timeout, and safety checks."""
     logs = workspace / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     prefix = f"{stage}_{attempt:02d}_{index:02d}"
@@ -112,6 +118,7 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
 
 
 def _stream_pipe(pipe, display, log_file, chunks: list[str], stage: str) -> None:
+    """Stream subprocess output to a log file."""
     if pipe is None:
         return
     pending: list[str] = []
@@ -134,11 +141,13 @@ def _stream_pipe(pipe, display, log_file, chunks: list[str], stage: str) -> None
 
 
 def _display_chunk_if_relevant(stage: str, chunk: str, display) -> None:
+    """Display useful live output chunks."""
     if _should_display_line(stage, chunk):
         print(chunk, file=display, end="", flush=True)
 
 
 def _should_display_line(stage: str, line: str) -> bool:
+    """Return whether a line should be shown live."""
     if stage != "experiment":
         return False
     lowered = line.lower()
@@ -167,6 +176,7 @@ def _should_display_line(stage: str, line: str) -> bool:
 
 
 def _command_env(workspace: Path) -> dict[str, str]:
+    """Build the subprocess environment for a command."""
     env = os.environ.copy()
     tmp_dir = workspace / ".tmp"
     pip_cache_dir = workspace / ".cache" / "pip"
@@ -185,6 +195,7 @@ def _command_env(workspace: Path) -> dict[str, str]:
 
 
 def _write_blocked_result(command: str, workspace: Path, stage: str, attempt: int, index: int, reason: str) -> CommandResult:
+    """Write write blocked result."""
     logs = workspace / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     prefix = f"{stage}_{attempt:02d}_{index:02d}"

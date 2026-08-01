@@ -1,3 +1,4 @@
+"""Write run artifacts such as state, diffs, and patch reports."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,6 +8,7 @@ from .models import AgentState, CodeTaskSpec, PatchReport
 
 
 def prepare_output_dir(spec: CodeTaskSpec) -> Path:
+    """Create or reuse the run output directory."""
     output_dir = spec.output_dir or (spec.repo_path / "coding_agent_run")
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "logs").mkdir(exist_ok=True)
@@ -14,6 +16,7 @@ def prepare_output_dir(spec: CodeTaskSpec) -> Path:
 
 
 def write_state(state: AgentState, output_dir: Path) -> None:
+    """Write the serialized agent state."""
     (output_dir / "state.json").write_text(
         state.model_dump_json(indent=2),
         encoding="utf-8",
@@ -21,18 +24,21 @@ def write_state(state: AgentState, output_dir: Path) -> None:
 
 
 def write_initial_diff(initial_diff: str, output_dir: Path) -> Path:
+    """Write the initial repository diff."""
     path = output_dir / "initial_diff.patch"
     path.write_text(initial_diff, encoding="utf-8")
     return path
 
 
 def write_diff(diff_text: str, output_dir: Path) -> Path:
+    """Write the current repository diff."""
     path = output_dir / "diff.patch"
     path.write_text(diff_text, encoding="utf-8")
     return path
 
 
 def write_patch_report(spec: CodeTaskSpec, report: PatchReport, output_dir: Path) -> Path:
+    """Write a markdown patch report."""
     lines = [
         "# Coding Agent Patch Report",
         "",

@@ -9,6 +9,7 @@ from .models import CodingAgentResult, CommandPlan, ReproState
 
 
 def run_coding_agent_for_patch(state: ReproState, plan: CommandPlan) -> CodingAgentResult:
+    """Run the external CodingAgent to produce and verify a repository patch."""
     if state.repo_context is None:
         raise RuntimeError("repo context is required before running CodingAgent")
     output_dir = state.task.workspace_dir / "patches" / f"coding_agent_{len(state.coding_agent_results) + 1:02d}"
@@ -41,6 +42,7 @@ def run_coding_agent_for_patch(state: ReproState, plan: CommandPlan) -> CodingAg
 
 
 def _task_goal(state: ReproState, plan: CommandPlan, env_summary: str) -> str:
+    """Build the CodingAgent patch goal text."""
     issues = "\n".join(f"- {item}" for item in plan.needs_user_input)
     commands = "\n".join(f"- {command}" for command in plan.commands)
     return f"""Modify the repository minimally so the experiment goal can be attempted without changing research semantics.
@@ -67,6 +69,7 @@ Prefer the smallest code/config change that resolves the validation issues. If a
 
 
 def _constraints(env_summary: str) -> list[str]:
+    """Build patch constraints for CodingAgent."""
     return [
         "Do not change model architecture unless explicitly required by the task.",
         "Do not change optimizer, loss function, dataset split, or evaluation metric unless explicitly required by the task.",
@@ -81,6 +84,7 @@ def _constraints(env_summary: str) -> list[str]:
 
 
 def _environment_summary(state: ReproState) -> str:
+    """Summarize the prepared runtime environment."""
     if state.environment is None:
         return "No reproagent-managed environment is available; use only repo-local inspection and report environment blockers."
     audit_details = ""
@@ -99,6 +103,7 @@ def _environment_summary(state: ReproState) -> str:
 
 
 def _verification_commands(state: ReproState, plan: CommandPlan) -> list[str]:
+    """Choose verification commands for the patch attempt."""
     commands: list[str] = []
     for attempt in state.probe_attempts:
         for result in attempt.results:
@@ -116,6 +121,7 @@ def _verification_commands(state: ReproState, plan: CommandPlan) -> list[str]:
 
 
 def _wrap_verify_command(command: str, env_name: str) -> str:
+    """Wrap a verification command in the prepared conda environment."""
     conda = str(find_conda())
     return " ".join([
         shlex.quote(conda),

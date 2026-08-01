@@ -1,3 +1,4 @@
+"""Call OpenAI-compatible chat completion APIs."""
 from __future__ import annotations
 
 import json
@@ -10,15 +11,18 @@ from typing import Any
 
 @dataclass
 class LLMClient:
+    """Small client for OpenAI-compatible chat completions."""
     api_base: str
     api_key_env: str
     model: str
 
     def complete_json(self, system: str, user: str) -> dict[str, Any]:
+        """Request a JSON response and parse it."""
         text = self.complete(system, user, response_format={"type": "json_object"})
         return json.loads(text)
 
     def complete(self, system: str, user: str, response_format: dict[str, str] | None = None) -> str:
+        """Request a raw chat completion response."""
         api_key = os.getenv(self.api_key_env)
         if not api_key:
             raise RuntimeError(f"missing API key environment variable: {self.api_key_env}")

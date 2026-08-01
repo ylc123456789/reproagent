@@ -6,6 +6,7 @@ from .text import normalize_text
 
 
 def save_state(state: ReproState):
+    """Persist the current workflow state to state.json."""
     state.task.workspace_dir.mkdir(parents=True, exist_ok=True)
     path = state.task.workspace_dir / "state.json"
     path.write_text(normalize_text(state.model_dump_json(indent=2)), encoding="utf-8")
@@ -13,6 +14,7 @@ def save_state(state: ReproState):
 
 
 def write_result(state: ReproState):
+    """Write the human-readable reproduction result report."""
     path = state.task.workspace_dir / "result.md"
     state.result_path = path
     lines = [
@@ -79,6 +81,7 @@ def write_result(state: ReproState):
 
 
 def _stage_lines(title: str, attempts) -> list[str]:
+    """Render report lines for stage attempts."""
     lines = [f"## {title}", ""]
     if not attempts:
         return lines + ["No attempts recorded.", ""]
@@ -109,6 +112,7 @@ def _stage_lines(title: str, attempts) -> list[str]:
 
 
 def _coding_agent_lines(results) -> list[str]:
+    """Render report lines for CodingAgent attempts."""
     lines = ["## Coding Agent", ""]
     if not results:
         return lines + ["No coding agent runs recorded.", ""]
@@ -133,6 +137,7 @@ def _coding_agent_lines(results) -> list[str]:
 
 
 def _planned_experiment_lines(plan) -> list[str]:
+    """Render report lines for an unexecuted experiment plan."""
     lines = ["## Planned Experiment", "", f"Plan: {plan.summary}", ""]
     if plan.feasibility:
         lines += [f"Feasibility: `{plan.feasibility}`", ""]
@@ -151,4 +156,5 @@ def _planned_experiment_lines(plan) -> list[str]:
     return lines
 
 def _clean_text(text: str) -> str:
+    """Normalize optional report text."""
     return normalize_text(text)

@@ -1,3 +1,4 @@
+"""Apply deterministic structured text edits safely."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,6 +7,7 @@ from .safety import ensure_path_allowed
 
 
 class StructuredEditError(RuntimeError):
+    """Raised when a deterministic structured edit cannot be applied safely."""
     pass
 
 
@@ -17,6 +19,7 @@ def replace_text_once(
     allowed_paths: list[str] | None = None,
     occurrence_index: int | None = None,
 ) -> str:
+    """Replace exact text after resolving a safe single match."""
     path = ensure_path_allowed(repo_root, relative_path, allowed_paths)
     text = path.read_text(encoding="utf-8", errors="ignore")
     index = _resolve_match_index(text, old_text, relative_path, "replace_text", occurrence_index)
@@ -33,6 +36,7 @@ def insert_before_anchor(
     allowed_paths: list[str] | None = None,
     occurrence_index: int | None = None,
 ) -> str:
+    """Insert text before a resolved anchor."""
     return _insert_at_anchor(
         repo_root,
         relative_path,
@@ -52,6 +56,7 @@ def insert_after_anchor(
     allowed_paths: list[str] | None = None,
     occurrence_index: int | None = None,
 ) -> str:
+    """Insert text after a resolved anchor."""
     return _insert_at_anchor(
         repo_root,
         relative_path,
@@ -72,6 +77,7 @@ def _insert_at_anchor(
     allowed_paths: list[str] | None,
     occurrence_index: int | None,
 ) -> str:
+    """Insert text around a resolved anchor location."""
     path = ensure_path_allowed(repo_root, relative_path, allowed_paths)
     text = path.read_text(encoding="utf-8", errors="ignore")
     action = "insert_before" if before else "insert_after"
@@ -100,6 +106,7 @@ def _resolve_match_index(
     action: str,
     occurrence_index: int | None,
 ) -> int:
+    """Resolve exact text to one match index."""
     if needle == "":
         raise StructuredEditError(f"{action} requires non-empty match text in {relative_path}")
     matches = find_all(text, needle)
@@ -115,6 +122,7 @@ def _resolve_match_index(
 
 
 def find_all(text: str, needle: str) -> list[int]:
+    """Return all non-overlapping match offsets."""
     matches: list[int] = []
     start = 0
     while True:
@@ -125,4 +133,5 @@ def find_all(text: str, needle: str) -> list[int]:
         start = index + max(len(needle), 1)
 
 def _inserting_at_line_boundary(text: str, index: int) -> bool:
+    """Return whether an index begins a line."""
     return index == 0 or text[index - 1] == "\n"

@@ -1,3 +1,4 @@
+"""Build lightweight repository context for controller prompts."""
 from __future__ import annotations
 
 import subprocess
@@ -27,6 +28,7 @@ def build_repo_context(
     max_bytes: int = 12_000,
     tree_limit: int = 500,
 ) -> RepoContext:
+    """Build tree, snippet, and initial diff context."""
     repo = spec.repo_path
     tree = _list_tree(repo, tree_limit)
     candidates = _rank_candidate_files(repo, tree, spec.task_goal)
@@ -36,6 +38,7 @@ def build_repo_context(
 
 
 def _list_tree(repo: Path, limit: int = 500) -> list[str]:
+    """List safe repository files up to a limit."""
     paths: list[str] = []
     for path in sorted(repo.rglob("*")):
         rel = path.relative_to(repo).as_posix()
@@ -49,6 +52,7 @@ def _list_tree(repo: Path, limit: int = 500) -> list[str]:
 
 
 def _rank_candidate_files(repo: Path, tree: list[str], task_goal: str) -> list[str]:
+    """Rank text files by relevance to the task goal."""
     keywords = {word.lower() for word in task_goal.replace("_", " ").replace("-", " ").split() if len(word) >= 4}
     scored: list[tuple[int, str]] = []
     for rel in tree:
@@ -74,6 +78,7 @@ def _rank_candidate_files(repo: Path, tree: list[str], task_goal: str) -> list[s
 
 
 def _read_snippet(path: Path, rel: str, max_bytes: int) -> FileSnippet:
+    """Read a bounded snippet from one file."""
     data = path.read_bytes()
     truncated = len(data) > max_bytes
     text = data[:max_bytes].decode("utf-8", errors="ignore")
@@ -81,6 +86,7 @@ def _read_snippet(path: Path, rel: str, max_bytes: int) -> FileSnippet:
 
 
 def _is_blocked(rel: str) -> bool:
+    """Return whether a relative path should be hidden."""
     path = Path(rel)
     if set(path.parts) & BLOCKED_PATH_PARTS:
         return True
@@ -88,6 +94,7 @@ def _is_blocked(rel: str) -> bool:
 
 
 def _git_diff(repo: Path) -> str:
+    """Return git diff output, or empty text on failure."""
     try:
         result = subprocess.run(
             ["git", "diff", "--no-ext-diff"],

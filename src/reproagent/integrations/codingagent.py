@@ -93,6 +93,7 @@ def run_code_task(
 
 
 def _load_config_codingagent_path(config_path: Path) -> str | None:
+    """Load load config codingagent path."""
     path = config_path.expanduser().resolve()
     if not path.exists():
         raise ValueError(f"Config file does not exist: {path}")
@@ -106,6 +107,7 @@ def _load_config_codingagent_path(config_path: Path) -> str | None:
 
 
 def _load_simple_yaml_codingagent_path(text: str) -> str | None:
+    """Load load simple yaml codingagent path."""
     in_agents = False
     agents_indent = 0
     for raw_line in text.splitlines():
@@ -127,6 +129,7 @@ def _load_simple_yaml_codingagent_path(text: str) -> str | None:
 
 
 def _import_root_for_checkout(checkout_path: Path) -> Path | None:
+    """Find the Python import root for a CodingAgent checkout."""
     src_layout = checkout_path / "src" / "coding_agent" / "__init__.py"
     flat_layout = checkout_path / "coding_agent" / "__init__.py"
     if src_layout.exists():
@@ -138,6 +141,7 @@ def _import_root_for_checkout(checkout_path: Path) -> Path | None:
 
 @contextlib.contextmanager
 def _codingagent_api(codingagent_path: Path | None) -> Iterator[ModuleType]:
+    """Load CodingAgent public APIs from a checkout."""
     if codingagent_path is None:
         yield importlib.import_module("coding_agent")
         return
@@ -151,6 +155,7 @@ def _codingagent_api(codingagent_path: Path | None) -> Iterator[ModuleType]:
 
 @contextlib.contextmanager
 def _isolated_sys_path_import(import_root: Path) -> Iterator[None]:
+    """Import a module with a temporary sys.path entry."""
     root = str(import_root)
     original_path = list(sys.path)
     removed_modules: dict[str, ModuleType] = {

@@ -23,6 +23,7 @@ Important: the system already runs every command inside the repository root and 
 
 
 def plan_environment(state: ReproState) -> CommandPlan:
+    """Ask the LLM for dependency setup commands."""
     prompt = _base_context(state) + """
 
 Plan dependency setup commands needed inside the already-created conda environment for the experiment goal and final reproduction target.
@@ -40,6 +41,7 @@ If no setup is needed, commands may be empty.
 
 
 def plan_probe(state: ReproState) -> CommandPlan:
+    """Ask the LLM for safe repository probe commands."""
     prompt = _base_context(state) + _recent_logs(state) + """
 
 Plan safe probe commands to discover the experiment interface before any real training/evaluation.
@@ -52,6 +54,7 @@ The purpose is to identify entry points, configurable parameters, config-file st
 
 
 def plan_experiment(state: ReproState) -> CommandPlan:
+    """Ask the LLM for the formal experiment command plan."""
     prompt = _base_context(state) + _recent_logs(state) + """
 
 Plan the final experiment/demo/evaluation commands to execute for the experiment goal, using the probe logs above.
@@ -68,6 +71,7 @@ Do not use cd, tee, shell log redirection, or conda activate; commands already r
 
 
 def revise_after_failure(state: ReproState, stage: str) -> CommandPlan:
+    """Ask the LLM to revise a stage plan after failed execution or validation."""
     prompt = _base_context(state) + _recent_logs(state) + f"""
 
 The previous {stage} attempt failed or the environment audit required repair. Diagnose the logs and propose a revised {stage} command plan.
@@ -116,6 +120,7 @@ Rules:
 
 
 def final_review(state: ReproState) -> str:
+    """Write the final LLM review for a run."""
     if state.task.mock_llm:
         return _mock_final_review(state)
     prompt = _base_context(state) + _recent_logs(state) + """
@@ -126,6 +131,7 @@ Write a concise reproduction result summary. Explain the experiment goal, what w
 
 
 def _complete_plan(state: ReproState, prompt: str, stage: str) -> CommandPlan:
+    """Call the LLM and normalize a command plan."""
     if state.task.mock_llm:
         return _mock_plan(stage)
     text = _openai_compatible_text(state, prompt)
@@ -150,6 +156,7 @@ def _complete_plan(state: ReproState, prompt: str, stage: str) -> CommandPlan:
 
 
 def _loads_plan_json(text: str) -> dict:
+    """Parse JSON returned by the LLM."""
     try:
         return json.loads(text)
     except json.JSONDecodeError as first_error:
@@ -163,9 +170,11 @@ def _loads_plan_json(text: str) -> dict:
 
 
 def _escape_invalid_json_backslashes(text: str) -> str:
+    """Repair invalid JSON backslash escapes."""
     return re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
 
 def _as_list(value, drop_false: bool = False) -> list[str]:
+    """Normalize a value into a list of strings."""
     if value is None or (drop_false and value is False):
         return []
     if isinstance(value, str):
@@ -176,6 +185,7 @@ def _as_list(value, drop_false: bool = False) -> list[str]:
 
 
 def _openai_compatible_text(state: ReproState, prompt: str) -> str:
+    """Call an OpenAI-compatible chat completion API."""
     api_key = os.environ.get(state.task.api_key_env)
     if not api_key:
         raise RuntimeError(f"{state.task.api_key_env} is not set. Use --mock-llm for local testing.")
@@ -201,6 +211,7 @@ def _openai_compatible_text(state: ReproState, prompt: str) -> str:
 
 
 def _chat_completions_url(api_base: str) -> str:
+    """Build the chat completions endpoint URL."""
     base = api_base.rstrip("/")
     if base.endswith("/chat/completions"):
         return base
@@ -208,6 +219,7 @@ def _chat_completions_url(api_base: str) -> str:
 
 
 def _base_context(state: ReproState) -> str:
+    """Render shared context for LLM prompts."""
     ctx = state.repo_context
     if ctx is None:
         return "No repo context available."
@@ -235,6 +247,7 @@ README/docs excerpt:
 
 
 def _mirror_context(state: ReproState) -> str:
+    """Render dependency mirror guidance for prompts."""
     profile = state.task.mirror_profile
     if profile == "none":
         return "Mirror policy: none. Use the repository instructions, the current pip/conda configuration, or official package indexes as appropriate."
@@ -259,6 +272,7 @@ def _mirror_context(state: ReproState) -> str:
     return "\n".join(lines)
 
 def _recent_logs(state: ReproState, max_chars: int = 12000) -> str:
+    """Render recent logs for LLM prompts."""
     chunks: list[str] = []
     if state.environment_audit:
         chunks.append("\n## latest environment audit\n")
@@ -299,6 +313,7 @@ def _recent_logs(state: ReproState, max_chars: int = 12000) -> str:
     return "\n".join(chunks)[-max_chars:]
 
 def _mock_plan(stage: str) -> CommandPlan:
+    """Return a deterministic mock command plan."""
     if stage == "environment":
         return CommandPlan(stage="environment", summary="Mock environment: no setup commands.", commands=[])
     if stage == "probe":
@@ -307,4 +322,5 @@ def _mock_plan(stage: str) -> CommandPlan:
 
 
 def _mock_final_review(state: ReproState) -> str:
+    """Return a deterministic mock final review."""
     return "Mock LLM review: the run completed in mock mode. Inspect logs and state.json for command results."
