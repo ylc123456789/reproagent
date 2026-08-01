@@ -82,6 +82,39 @@ Do not use cd, tee, shell log redirection, or conda activate; commands already r
     return _complete_plan(state, prompt, stage=stage)
 
 
+def review_experiment_plan_semantics(state: ReproState, plan: CommandPlan) -> list[str]:
+    """Ask the LLM whether the final experiment plan really attempts the goal."""
+    if state.task.mock_llm:
+        return []
+    prompt = _base_context(state) + _recent_logs(state) + f"""
+
+Review this proposed final experiment plan for semantic alignment. Return strict JSON only:
+{{"issues": ["..."]}}
+
+Experiment goal:
+{state.task.experiment_goal}
+
+Plan summary:
+{plan.summary}
+
+Plan commands:
+{chr(10).join(f"- {command}" for command in plan.commands) or "- none"}
+
+Plan assumptions:
+{chr(10).join(f"- {item}" for item in plan.assumptions) or "- none"}
+
+Rules:
+- The final experiment stage must directly attempt the user experiment goal.
+- CodingAgent verification commands are only patch verification evidence; they do not count as the final ReproAgent experiment stage.
+- Dependency installs, import/version checks, --help, grep/sed/find/cat, and smoke checks are not sufficient final experiment commands.
+- If the goal says bounded, GPU, specific entry point, dataset, metric, or runtime evidence, the final commands must reflect those requirements explicitly or explain why blocked.
+- If the plan is acceptable, return {{"issues": []}}.
+"""
+    text = _openai_compatible_text(state, prompt)
+    data = _loads_plan_json(text)
+    return normalize_text_list(_as_list(data.get("issues", []), drop_false=True))
+
+
 def final_review(state: ReproState) -> str:
     if state.task.mock_llm:
         return _mock_final_review(state)

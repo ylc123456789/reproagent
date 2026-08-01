@@ -1,19 +1,21 @@
 """Lightweight final experiment-plan validation."""
 from __future__ import annotations
 
+import re
+
 from .models import CommandPlan, ReproState
 
 GUESS_MARKERS = ("assume", "likely", "typical", "probably", "we assume", "may print")
 LOG_REDIRECTION_MARKERS = (" tee ", "| tee", "2>&1", " >", " >>")
-LOSS_EVIDENCE_MARKERS = ("loss", "criterion", "crossentropy", "cross_entropy")
 LOSS_OUTPUT_MARKERS = ("logger.info", "print(", "logging.info")
+EXPERIMENT_ENTRYPOINT_RE = r"[A-Za-z0-9_./-]+\.py"
 
 
 def validate_experiment_plan(state: ReproState, plan: CommandPlan) -> CommandPlan:
     """Return a copy of plan annotated with obvious validation issues.
 
     This is intentionally conservative: it does not try to prove a plan correct.
-    It only catches common high-signal mismatches between the user goal, probe
+    It catches common high-signal mismatches between the user goal, probe
     evidence, and final command plan.
     """
     issues: list[str] = []
@@ -42,6 +44,13 @@ def validate_experiment_plan(state: ReproState, plan: CommandPlan) -> CommandPla
     if _mentions_any(command_text, LOG_REDIRECTION_MARKERS) or command_text.startswith("cd ") or "\ncd " in command_text:
         issues.append("Final commands should not use cd, tee, or shell log redirection; the runner already sets cwd and captures stdout/stderr.")
 
+    if _experiment_commands_are_only_setup_or_inspection(plan.commands):
+        issues.append("Experiment plan only contains dependency/setup or inspection commands; final experiment commands must directly run training, evaluation, demo, or another goal-directed experiment entry point.")
+
+    missing_entrypoint = _missing_goal_entrypoint(goal, command_text)
+    if missing_entrypoint:
+        issues.append(f"Experiment goal names `{missing_entrypoint}`, but final commands do not run that entry point.")
+
     if not issues:
         return plan
 
@@ -55,6 +64,19 @@ def validate_experiment_plan(state: ReproState, plan: CommandPlan) -> CommandPla
     })
 
 
+def annotate_plan_with_validation_issues(plan: CommandPlan, issues: list[str]) -> CommandPlan:
+    """Apply validation issues from a secondary reviewer such as an LLM."""
+    if not issues:
+        return plan
+    existing_inputs = [item for item in plan.needs_user_input if item not in issues]
+    stop_reason = (plan.stop_reason or "").strip()
+    validation_reason = "Semantic validation issues: " + " ".join(issues)
+    return plan.model_copy(update={
+        "feasibility": _downgraded_feasibility(plan, issues),
+        "needs_user_input": existing_inputs + issues,
+        "stop_reason": f"{stop_reason}\n{validation_reason}".strip(),
+    })
+
 
 def _has_gpu_execution_evidence(command_text: str, plan_text: str, probe_text: str) -> bool:
     evidence = "\n".join([command_text, plan_text, probe_text])
@@ -63,6 +85,7 @@ def _has_gpu_execution_evidence(command_text: str, plan_text: str, probe_text: s
     if "default=0" in evidence and "gpu" in evidence and "torch.cuda.is_available" in evidence:
         return True
     return False
+
 
 def _probe_text(state: ReproState) -> str:
     chunks: list[str] = []
@@ -106,6 +129,37 @@ def _loss_logging_is_uncertain(probe_text: str) -> bool:
     if "loss_meter" in lowered_text and _mentions_any(lowered_text, LOSS_OUTPUT_MARKERS):
         return False
     return True
+
+
+def _experiment_commands_are_only_setup_or_inspection(commands: list[str]) -> bool:
+    meaningful = [command.strip() for command in commands if command.strip()]
+    if not meaningful:
+        return False
+    return all(_is_setup_or_inspection_command(command) for command in meaningful)
+
+
+def _is_setup_or_inspection_command(command: str) -> bool:
+    lowered = command.strip().lower()
+    if lowered.startswith(("pip install", "python -m pip install", "python3 -m pip install", "conda install", "mamba install")):
+        return True
+    if lowered.startswith(("python -c", "python3 -c")):
+        inspection_markers = ("import ", "print(", "__version__", "cuda.is_available", "device_count")
+        return any(marker in lowered for marker in inspection_markers)
+    if "--help" in lowered or lowered.endswith(" -h") or " -h " in lowered:
+        return True
+    if lowered.startswith(("ls", "find", "rg", "grep", "sed", "cat", "head", "tail", "wc", "pwd")):
+        return True
+    if lowered.startswith(("python -m py_compile", "python3 -m py_compile")):
+        return True
+    return False
+
+
+def _missing_goal_entrypoint(goal: str, command_text: str) -> str | None:
+    for match in re.finditer(EXPERIMENT_ENTRYPOINT_RE, goal):
+        entrypoint = match.group(0).strip("`'\".,;:)")
+        if entrypoint and entrypoint.lower() not in command_text:
+            return entrypoint
+    return None
 
 
 def _downgraded_feasibility(plan: CommandPlan, issues: list[str]) -> str:

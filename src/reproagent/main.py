@@ -9,12 +9,12 @@ from .coding import run_coding_agent_for_patch
 from .audit import audit_environment
 from .env import ensure_environment
 from .integrations.codingagent import configured_codingagent_path
-from .llm import final_review, plan_environment, plan_experiment, plan_probe, revise_after_failure
+from .llm import final_review, plan_environment, plan_experiment, plan_probe, revise_after_failure, review_experiment_plan_semantics
 from .models import ReproState, ReproTask, StageResult
 from .report import save_state, write_result
 from .runner import run_commands
 from .text import normalize_text
-from .validation import validate_experiment_plan
+from .validation import annotate_plan_with_validation_issues, validate_experiment_plan
 
 
 def _log(message: str) -> None:
@@ -162,10 +162,12 @@ def _run_stage_loop(state: ReproState, stage: str, max_attempts: int) -> bool:
             elif stage == "probe":
                 plan = plan_probe(state)
             else:
-                plan = _validated_experiment_plan(state)
+                plan = plan_experiment(state)
         else:
             plan = revise_after_failure(state, stage=stage)
 
+        if stage == "experiment":
+            plan = _validate_experiment_plan(state, plan)
         _print_plan(stage, attempt, plan)
         if stage == "experiment" and plan.feasibility and plan.feasibility != "ready_to_run":
             if plan.feasibility == "needs_patch":
@@ -246,10 +248,23 @@ def _stage_succeeded(stage: str, stage_result: StageResult) -> bool:
 
 def _validated_experiment_plan(state: ReproState):
     plan = plan_experiment(state)
+    validated = _validate_experiment_plan(state, plan)
+    state.planned_experiment = validated
+    return validated
+
+
+def _validate_experiment_plan(state: ReproState, plan):
     validated = validate_experiment_plan(state, plan)
+    if validated is plan and validated.feasibility == "ready_to_run":
+        try:
+            issues = review_experiment_plan_semantics(state, validated)
+        except Exception as exc:
+            _log(f"semantic plan review skipped: {exc}")
+            issues = []
+        if issues:
+            validated = annotate_plan_with_validation_issues(validated, issues)
     if validated is not plan and validated.needs_user_input:
         _log("plan validation flagged issues")
-    state.planned_experiment = validated
     return validated
 
 

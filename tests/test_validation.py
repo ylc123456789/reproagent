@@ -163,3 +163,27 @@ def test_validation_accepts_loss_logging_from_completed_coding_agent_patch(tmp_p
     validated = validate_experiment_plan(state, plan)
 
     assert not any("training loss" in item for item in validated.needs_user_input)
+
+
+def test_validation_rejects_setup_only_experiment_plan(tmp_path):
+    state = _state_with_probe(
+        tmp_path,
+        "Run a bounded GPU experiment using examples/odenet_mnist.py and report test accuracy.",
+        "--nepochs NEPOCHS\n--gpu GPU\n",
+    )
+    plan = CommandPlan(
+        stage="experiment",
+        summary="Install torchvision and confirm import.",
+        commands=[
+            "pip install torchvision",
+            "python -c \"import torchvision; print(torchvision.__version__)\"",
+        ],
+        assumptions=["torchvision may be needed."],
+        feasibility="ready_to_run",
+    )
+
+    validated = validate_experiment_plan(state, plan)
+
+    assert validated.feasibility == "needs_config"
+    assert any("only contains dependency/setup or inspection" in issue for issue in validated.needs_user_input)
+    assert any("examples/odenet_mnist.py" in issue for issue in validated.needs_user_input)

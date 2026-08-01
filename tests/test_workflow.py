@@ -94,3 +94,106 @@ def test_experiment_validation_failure_stops_before_running_commands(tmp_path, m
     assert state.experiment_attempts
     assert state.experiment_attempts[0].plan.feasibility == "needs_patch"
     assert not state.experiment_attempts[0].results
+
+
+def test_revised_experiment_plan_is_validated_before_execution(tmp_path, monkeypatch):
+    from reproagent import main
+    from reproagent.models import CommandPlan, EnvironmentAudit, EnvironmentInfo, RepoContext, ReproTask
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(main, "collect_context", lambda task: RepoContext(repo_path=repo, file_tree="examples/odenet_mnist.py", readme_text="demo"))
+    monkeypatch.setattr(main, "ensure_environment", lambda state: EnvironmentInfo(env_name="repro_test", created=True))
+    monkeypatch.setattr(main, "audit_environment", lambda state: EnvironmentAudit(success=True, summary="ok"))
+    monkeypatch.setattr(main, "plan_environment", lambda state: CommandPlan(stage="environment", summary="env", commands=[]))
+    monkeypatch.setattr(main, "plan_probe", lambda state: CommandPlan(stage="probe", summary="probe", commands=[]))
+    monkeypatch.setattr(main, "review_experiment_plan_semantics", lambda state, plan: [])
+    monkeypatch.setattr(
+        main,
+        "plan_experiment",
+        lambda state: CommandPlan(
+            stage="experiment",
+            summary="unbounded initial plan",
+            commands=["python examples/odenet_mnist.py --gpu 0"],
+            feasibility="ready_to_run",
+        ),
+    )
+    monkeypatch.setattr(
+        main,
+        "revise_after_failure",
+        lambda state, stage: CommandPlan(
+            stage="experiment",
+            summary="bad revised setup-only plan",
+            commands=["pip install torchvision", "python -c \"import torchvision; print(torchvision.__version__)\""],
+            feasibility="ready_to_run",
+        ),
+    )
+
+    seen_experiment_commands = []
+
+    def fake_run_commands(commands, cwd, workspace, stage, attempt, timeout, env_name):
+        if stage == "experiment":
+            seen_experiment_commands.extend(commands)
+            raise AssertionError("invalid revised experiment plan must not execute")
+        return []
+
+    monkeypatch.setattr(main, "run_commands", fake_run_commands)
+
+    state = main.run_task(ReproTask(
+        paper_url="paper",
+        repo_url="repo",
+        workspace_dir=tmp_path / "run",
+        mock_llm=True,
+        experiment_goal="Run a bounded GPU experiment using examples/odenet_mnist.py and report test accuracy.",
+        max_run_attempts=2,
+    ))
+
+    assert state.status == "completed_with_failures"
+    assert len(state.experiment_attempts) == 2
+    assert state.experiment_attempts[1].plan.feasibility == "needs_config"
+    assert any("only contains dependency/setup or inspection" in issue for issue in state.experiment_attempts[1].plan.needs_user_input)
+    assert seen_experiment_commands == []
+
+
+def test_llm_semantic_review_can_reject_ready_experiment_plan(tmp_path, monkeypatch):
+    from reproagent import main
+    from reproagent.models import CommandPlan, EnvironmentAudit, EnvironmentInfo, RepoContext, ReproTask
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(main, "collect_context", lambda task: RepoContext(repo_path=repo, file_tree="train.py", readme_text="demo"))
+    monkeypatch.setattr(main, "ensure_environment", lambda state: EnvironmentInfo(env_name="repro_test", created=True))
+    monkeypatch.setattr(main, "audit_environment", lambda state: EnvironmentAudit(success=True, summary="ok"))
+    monkeypatch.setattr(main, "plan_environment", lambda state: CommandPlan(stage="environment", summary="env", commands=[]))
+    monkeypatch.setattr(main, "plan_probe", lambda state: CommandPlan(stage="probe", summary="probe", commands=[]))
+    monkeypatch.setattr(main, "review_experiment_plan_semantics", lambda state, plan: ["LLM reviewer says this does not measure the requested metric."])
+    monkeypatch.setattr(
+        main,
+        "plan_experiment",
+        lambda state: CommandPlan(
+            stage="experiment",
+            summary="run bounded",
+            commands=["python train.py --epochs 1 --gpu 0"],
+            feasibility="ready_to_run",
+        ),
+    )
+
+    def fake_run_commands(commands, cwd, workspace, stage, attempt, timeout, env_name):
+        if stage == "experiment":
+            raise AssertionError("semantic validation failure must stop before execution")
+        return []
+
+    monkeypatch.setattr(main, "run_commands", fake_run_commands)
+
+    state = main.run_task(ReproTask(
+        paper_url="paper",
+        repo_url="repo",
+        workspace_dir=tmp_path / "run",
+        mock_llm=False,
+        experiment_goal="Run a bounded GPU experiment and report F1.",
+        max_run_attempts=1,
+    ))
+
+    assert state.status == "completed_with_failures"
+    assert state.experiment_attempts[0].plan.feasibility == "needs_config"
+    assert "LLM reviewer" in state.experiment_attempts[0].plan.needs_user_input[0]
