@@ -20,3 +20,10 @@ def test_task_default_experiment_goal_is_empty(tmp_path):
     assert task.experiment_goal == ""
     assert not task.confirm_before_experiment
     assert not task.plan_only
+
+
+def test_task_default_codingagent_path_is_none(tmp_path):
+    task = ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path)
+
+    assert task.codingagent_path is None
+    assert task.config_path is None

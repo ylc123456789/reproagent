@@ -49,7 +49,7 @@ Runtime requirement:
 conda must be available on PATH, or set REPROAGENT_CONDA_EXE=/path/to/conda
 ```
 
-A Python venv also works for local development, but the conda setup above is the recommended path for servers.
+Use the conda setup above for local and server development so CLI behavior matches the reproduction backend.
 
 ## Run with Mock LLM
 
@@ -107,6 +107,40 @@ reproagent run \
 ```
 
 Use the exact model name provided by your API provider.
+
+## CodingAgent Location
+
+`reproagent` can call CodingAgent when `--enable-coding-agent` is set and final-plan validation reports that a repo-local patch is needed. CodingAgent is treated as an external dependency, not as a fixed nested repository path.
+
+Configure its checkout path in this priority order:
+
+```text
+CLI:             --codingagent-path /home/cyl/CodingAgent
+Environment:     CODINGAGENT_PATH=/home/cyl/CodingAgent
+Config file:     agents.codingagent_path
+Fallback:        importable `coding_agent` package, if available
+```
+
+Example config file:
+
+```yaml
+agents:
+  codingagent_path: /home/cyl/CodingAgent
+```
+
+Relative CLI and environment paths resolve against the current working directory. Relative config values resolve against the config file directory.
+
+Example:
+
+```bash
+reproagent run \
+  --paper https://arxiv.org/abs/xxxx.xxxxx \
+  --repo https://github.com/user/project \
+  --workspace runs/demo \
+  --experiment-goal "Run a bounded GPU evaluation and report metrics." \
+  --enable-coding-agent \
+  --codingagent-path /home/cyl/CodingAgent
+```
 
 ## Execution Model
 

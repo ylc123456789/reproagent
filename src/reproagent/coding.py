@@ -1,12 +1,10 @@
-"""Adapter for the vendored generic coding_agent package."""
+"""Repo-local patch orchestration through the CodingAgent integration."""
 from __future__ import annotations
 
 import shlex
 
-from coding_agent import CodeTaskSpec, run_code_task
-
 from .env import find_conda
-
+from .integrations.codingagent import run_code_task as run_codingagent_code_task
 from .models import CodingAgentResult, CommandPlan, ReproState
 
 
@@ -16,7 +14,8 @@ def run_coding_agent_for_patch(state: ReproState, plan: CommandPlan) -> CodingAg
     output_dir = state.task.workspace_dir / "patches" / f"coding_agent_{len(state.coding_agent_results) + 1:02d}"
     env_summary = _environment_summary(state)
     verify_commands = _verification_commands(state, plan)
-    report = run_code_task(CodeTaskSpec(
+    report = run_codingagent_code_task(
+        codingagent_path=state.task.codingagent_path,
         repo_path=state.repo_context.repo_path,
         task_goal=_task_goal(state, plan, env_summary),
         constraints=_constraints(env_summary),
@@ -27,7 +26,7 @@ def run_coding_agent_for_patch(state: ReproState, plan: CommandPlan) -> CodingAg
         api_key_env=state.task.api_key_env,
         model=state.task.model or "gpt-4.1",
         output_dir=output_dir,
-    ))
+    )
     return CodingAgentResult(
         status=report.status,
         summary=report.summary,
@@ -80,20 +79,24 @@ def _constraints(env_summary: str) -> list[str]:
         "Environment context: " + env_summary.replace(chr(10), " / "),
     ]
 
+
 def _environment_summary(state: ReproState) -> str:
     if state.environment is None:
         return "No reproagent-managed environment is available; use only repo-local inspection and report environment blockers."
     audit_details = ""
     if state.environment_audit and state.environment_audit.details:
         audit_details = chr(10) + "- Audit details: " + " / ".join(state.environment_audit.details)
+    codingagent_path = str(state.task.codingagent_path) if state.task.codingagent_path else "importable default"
     return (
         f"- reproagent has already prepared the conda environment {state.environment.env_name!r} for this repository.\n"
         f"- Environment backend: {state.environment.backend}. Created this run: {state.environment.created}.\n"
+        f"- CodingAgent source: {codingagent_path}.\n"
         f"- Verification commands are executed via conda run -n {state.environment.env_name} bash -c <command>.\n"
         "- Do not install, upgrade, or remove dependencies from CodingAgent. Dependency/environment repair belongs to reproagent environment stage.\n"
         "- Your responsibility is repo-local code/config edits and verification inside the prepared environment."
         f"{audit_details}"
     )
+
 
 def _verification_commands(state: ReproState, plan: CommandPlan) -> list[str]:
     commands: list[str] = []

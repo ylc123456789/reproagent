@@ -48,13 +48,16 @@ Keep the project small:
 ```text
 src/reproagent/
   __init__.py
-  models.py    # shared Pydantic data structures
-  context.py   # clone repo and collect README/file evidence
-  env.py       # conda environment creation and command wrapping
-  llm.py       # LLM prompts and OpenAI-compatible API calls
-  runner.py    # command safety checks, execution, live log streaming
-  report.py    # write result.md and state.json
-  main.py      # CLI and top-level workflow
+  models.py                    # shared Pydantic data structures
+  context.py                   # clone repo and collect README/file evidence
+  env.py                       # conda environment creation and command wrapping
+  llm.py                       # LLM prompts and OpenAI-compatible API calls
+  runner.py                    # command safety checks, execution, live log streaming
+  validation.py                # conservative final experiment-plan validation
+  coding.py                    # reproagent patch-cycle orchestration
+  integrations/codingagent.py  # only CodingAgent location/import boundary
+  report.py                    # write result.md and state.json
+  main.py                      # CLI and top-level workflow
 ```
 
 ## 4. Environment Strategy
@@ -162,6 +165,19 @@ The next milestone is: improve final-plan validation, especially checking that g
 
 ## 9. CodingAgent Integration
 
-`reproagent` vendors the generic CodingAgent package under `src/coding_agent/`, but CodingAgent should remain a generic programming agent. Do not make reproagent-specific modifications inside the vendored package. Fix CodingAgent in `/home/cyl/CodingAgent`, then sync the vendored copy.
+CodingAgent is a separate generic programming-agent project. ReproAgent may call it when `--enable-coding-agent` is set and final-plan validation reports `needs_patch`, but ReproAgent must not rely on CodingAgent living at a fixed path inside the ReproAgent checkout.
 
-Reproagent owns environment creation, dependency installation, audit, hardware context, experiment-goal validation, and deciding when to call CodingAgent. CodingAgent owns minimal repo-local code/config edits, verification inside the prepared environment, and patch report/diff generation. The adapter is `src/reproagent/coding.py`; it passes the prepared conda environment summary and wraps verification commands so they run in the same task environment. CodingAgent is explicitly instructed not to install, upgrade, or remove dependencies.
+Configuration priority:
+
+```text
+CLI argument:     --codingagent-path
+Environment var:  CODINGAGENT_PATH
+Config file:      agents.codingagent_path
+Fallback:         importable `coding_agent` package, if available
+```
+
+`src/reproagent/integrations/codingagent.py` is the only module that resolves the path, validates that it looks like a CodingAgent checkout, and imports the CodingAgent Python API. Other ReproAgent modules call this adapter instead of constructing paths or importing CodingAgent directly.
+
+Relative CLI and environment paths resolve against the current working directory. Relative config values resolve against the config file directory. Invalid paths fail with explicit errors.
+
+ReproAgent owns environment creation, dependency installation, audit, hardware context, experiment-goal validation, and deciding when to call CodingAgent. CodingAgent owns minimal repo-local code/config edits, verification inside the prepared environment, and patch report/diff generation. CodingAgent is explicitly instructed not to install, upgrade, or remove dependencies.

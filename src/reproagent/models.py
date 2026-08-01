@@ -33,6 +33,8 @@ class ReproTask(BaseModel):
     plan_only: bool = False
     enable_coding_agent: bool = False
     max_coding_agent_steps: int = 24
+    codingagent_path: Path | None = None
+    config_path: Path | None = None
     mirror_profile: MirrorProfile = "none"
     mirror_strict: bool = False
 

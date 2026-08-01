@@ -64,3 +64,21 @@ def test_write_result_includes_planned_experiment(tmp_path):
     assert "## Planned Experiment" in text
     assert "--nepochs 1 --gpu 0" in text
     assert "Feasibility: `ready_to_run`" in text
+
+
+def test_write_result_includes_codingagent_path(tmp_path):
+    from reproagent.models import ReproState, ReproTask
+    from reproagent.report import write_result
+
+    task = ReproTask(
+        paper_url="paper",
+        repo_url="repo",
+        workspace_dir=tmp_path,
+        experiment_goal="Run MNIST.",
+        codingagent_path=tmp_path / "CodingAgent",
+    )
+    state = ReproState(task=task, status="completed")
+
+    path = write_result(state)
+
+    assert f"CodingAgent path: `{tmp_path / 'CodingAgent'}`" in path.read_text(encoding="utf-8")

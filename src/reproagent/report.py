@@ -23,7 +23,9 @@ def write_result(state: ReproState):
         f"- Paper: {state.task.paper_url}",
         f"- Repo: {state.task.repo_url}",
         f"- Backend: {state.task.backend}",
-        f"- Experiment goal: {state.task.experiment_goal or 'not specified'}", "",
+        f"- Experiment goal: {state.task.experiment_goal or 'not specified'}",
+        f"- CodingAgent path: `{state.task.codingagent_path or 'importable default'}`",
+        "",
     ]
     if state.repo_context:
         lines += [

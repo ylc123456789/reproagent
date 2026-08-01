@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from reproagent.main import _final_summary, _run_probe_once_after_patch, _stage_succeeded, build_parser
 from reproagent.models import CodingAgentResult, CommandPlan, CommandResult, EnvironmentInfo, RepoContext, ReproState, ReproTask, StageResult
 
@@ -245,3 +247,20 @@ def test_run_parser_reads_mirror_options(tmp_path):
 
     assert args.mirror_profile == "autodl"
     assert args.mirror_strict
+
+
+def test_run_parser_reads_codingagent_path_and_config(tmp_path):
+    parser = build_parser()
+    args = parser.parse_args([
+        "run",
+        "--paper", "paper",
+        "--repo", "repo",
+        "--workspace", str(tmp_path),
+        "--experiment-goal", "Run MNIST.",
+        "--enable-coding-agent",
+        "--codingagent-path", "/home/cyl/CodingAgent",
+        "--config", str(tmp_path / "reproagent.yaml"),
+    ])
+
+    assert args.codingagent_path == Path("/home/cyl/CodingAgent")
+    assert args.config == tmp_path / "reproagent.yaml"

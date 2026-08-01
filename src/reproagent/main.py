@@ -8,6 +8,7 @@ from .context import collect_context
 from .coding import run_coding_agent_for_patch
 from .audit import audit_environment
 from .env import ensure_environment
+from .integrations.codingagent import configured_codingagent_path
 from .llm import final_review, plan_environment, plan_experiment, plan_probe, revise_after_failure
 from .models import ReproState, ReproTask, StageResult
 from .report import save_state, write_result
@@ -346,6 +347,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--plan-only", action="store_true", help="Stop after probe and final experiment-plan generation; do not run experiment commands")
     run.add_argument("--enable-coding-agent", action="store_true", help="Allow CodingAgent to patch the cloned repository when validation reports needs_patch")
     run.add_argument("--max-coding-agent-steps", type=int, default=24, help="Maximum CodingAgent controller steps per patch attempt")
+    run.add_argument("--codingagent-path", type=Path, default=None, help="Path to an external CodingAgent checkout; overrides CODINGAGENT_PATH and config")
+    run.add_argument("--config", type=Path, default=None, help="Optional JSON/YAML config file; supports agents.codingagent_path")
     run.add_argument("--mirror-profile", default="none", choices=["none", "cn", "autodl"], help="Preferred dependency mirror profile for LLM environment planning")
     run.add_argument("--mirror-strict", action="store_true", help="Require environment plans to stay on the selected mirror profile instead of silently falling back to official indexes")
     return parser
@@ -354,6 +357,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     if args.command == "run":
+        codingagent_path = None
+        if args.enable_coding_agent or args.codingagent_path or args.config:
+            codingagent_path = configured_codingagent_path(args.codingagent_path, args.config)
         task = ReproTask(
             paper_url=args.paper,
             repo_url=args.repo,
@@ -372,6 +378,8 @@ def main(argv: list[str] | None = None) -> None:
             plan_only=args.plan_only,
             enable_coding_agent=args.enable_coding_agent,
             max_coding_agent_steps=args.max_coding_agent_steps,
+            codingagent_path=codingagent_path,
+            config_path=args.config,
             mirror_profile=args.mirror_profile,
             mirror_strict=args.mirror_strict,
         )
