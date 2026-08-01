@@ -17,6 +17,7 @@ reproagent = "reproagent.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["reproagent*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

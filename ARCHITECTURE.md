@@ -178,6 +178,8 @@ Fallback:         importable `coding_agent` package, if available
 
 `src/reproagent/integrations/codingagent.py` is the only module that resolves the path, validates that it looks like a CodingAgent checkout, and imports the CodingAgent Python API. Other ReproAgent modules call this adapter instead of constructing paths or importing CodingAgent directly.
 
+`reproagent` may keep a synchronized `vendor/coding_agent/` source copy, but packaging is restricted to `reproagent*` so `pip install -e reproagent` does not install or shadow the global `coding_agent` package in a shared controller environment. Use `--codingagent-path` or `CODINGAGENT_PATH` to select the intended CodingAgent checkout explicitly.
+
 Relative CLI and environment paths resolve against the current working directory. Relative config values resolve against the config file directory. Invalid paths fail with explicit errors.
 
 ReproAgent owns environment creation, dependency installation, audit, hardware context, experiment-goal validation, and deciding when to call CodingAgent. CodingAgent owns minimal repo-local code/config edits, verification inside the prepared environment, and patch report/diff generation. CodingAgent is explicitly instructed not to install, upgrade, or remove dependencies.

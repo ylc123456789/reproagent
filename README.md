@@ -49,7 +49,7 @@ Runtime requirement:
 conda must be available on PATH, or set REPROAGENT_CONDA_EXE=/path/to/conda
 ```
 
-Use the conda setup above for local and server development so CLI behavior matches the reproduction backend.
+Use the conda setup above for local and server development so CLI behavior matches the reproduction backend. The controller environment should use Python 3.11 when ReproAgent, ExpAgent, and CodingAgent share one environment; per-task reproduction environments still use `--python-version` when no target repo environment file exists.
 
 ## Run with Mock LLM
 
@@ -120,6 +120,8 @@ Environment:     CODINGAGENT_PATH=/home/cyl/CodingAgent
 Config file:     agents.codingagent_path
 Fallback:        importable `coding_agent` package, if available
 ```
+
+For a shared controller environment, install the external CodingAgent checkout into that same environment and pass its path. `reproagent` keeps `vendor/coding_agent/` only as a synchronized vendored source copy; `pip install -e .` installs only the `reproagent` package to avoid shadowing the global CodingAgent package.
 
 Example config file:
 
