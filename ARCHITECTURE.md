@@ -158,3 +158,18 @@ web UI
 ```
 
 The next milestone is: improve final-plan validation, especially checking that goal words such as bounded, GPU, loss, accuracy, or full reproduction are reflected in explicit commands/configs before expensive runs start.
+
+
+## 9. CodingAgent Integration
+
+`reproagent` vendors the generic CodingAgent package under `src/coding_agent/`, but CodingAgent should remain a generic programming agent. Do not make reproagent-specific modifications inside the vendored package. Fix CodingAgent in `/home/cyl/CodingAgent`, then sync the vendored copy.
+
+Reproagent owns environment creation, dependency installation, audit, hardware context, experiment-goal validation, and deciding when to call CodingAgent. CodingAgent owns minimal repo-local code/config edits, verification inside the prepared environment, and patch report/diff generation. The adapter is `src/reproagent/coding.py`; it passes the prepared conda environment summary and wraps verification commands so they run in the same task environment. CodingAgent is explicitly instructed not to install, upgrade, or remove dependencies.
+
+## 10. Handoff Document
+
+For current operational details, AutoDL notes, known-good test command, limitations, and next development tasks, see:
+
+```text
+docs/DEVELOPER_HANDOFF.md
+```
