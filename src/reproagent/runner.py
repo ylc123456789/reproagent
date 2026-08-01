@@ -12,6 +12,7 @@ from .env import build_backend_command, find_conda
 from .models import CommandResult
 
 BLOCKED_SNIPPETS = ["sudo", "rm -rf", "| bash", "> /", "shutdown", "reboot", "conda activate"]
+COMMAND_HEARTBEAT_SECONDS = 60
 
 
 def is_safe_command(command: str, stage: str | None = None) -> tuple[bool, str | None]:
@@ -96,7 +97,7 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
             ]
             for thread in threads:
                 thread.start()
-            code = process.wait(timeout=timeout)
+            code = _wait_for_process(process, timeout, stage, attempt, index, stdout_path, stderr_path)
             for thread in threads:
                 thread.join(timeout=1)
     except subprocess.TimeoutExpired:
@@ -115,6 +116,30 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
     duration = round(time.monotonic() - start, 2)
     print(f"[reproagent] finished {stage} command {attempt}.{index}: exit={code}, duration={duration}s", flush=True)
     return CommandResult(command=command, exit_code=code, stdout_path=stdout_path, stderr_path=stderr_path, duration_seconds=duration, backend_command=backend_command)
+
+
+def _wait_for_process(process: subprocess.Popen[str], timeout: int, stage: str, attempt: int, index: int, stdout_path: Path, stderr_path: Path) -> int:
+    """Wait for a process while printing periodic liveness heartbeats."""
+    deadline = time.monotonic() + timeout
+    next_heartbeat = time.monotonic() + COMMAND_HEARTBEAT_SECONDS
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(process.args, timeout)
+        try:
+            return process.wait(timeout=min(1.0, COMMAND_HEARTBEAT_SECONDS, remaining))
+        except subprocess.TimeoutExpired:
+            now = time.monotonic()
+            if stage == "experiment" and now >= next_heartbeat:
+                stdout_size = stdout_path.stat().st_size if stdout_path.exists() else 0
+                stderr_size = stderr_path.stat().st_size if stderr_path.exists() else 0
+                elapsed = round(timeout - remaining)
+                print(
+                    f"[reproagent] still running {stage} command {attempt}.{index}: "
+                    f"elapsed={elapsed}s, stdout={stdout_size}B, stderr={stderr_size}B",
+                    flush=True,
+                )
+                next_heartbeat = now + COMMAND_HEARTBEAT_SECONDS
 
 
 def _stream_pipe(pipe, display, log_file, chunks: list[str], stage: str) -> None:
@@ -148,31 +173,7 @@ def _display_chunk_if_relevant(stage: str, chunk: str, display) -> None:
 
 def _should_display_line(stage: str, line: str) -> bool:
     """Return whether a line should be shown live."""
-    if stage != "experiment":
-        return False
-    lowered = line.lower()
-    markers = (
-        "epoch",
-        "iter",
-        "step",
-        "loss",
-        "acc",
-        "accuracy",
-        "test",
-        "val",
-        "eval",
-        "nfe",
-        "eta",
-        "%",
-        "it/s",
-        "real	",
-        "runtime",
-        "error",
-        "traceback",
-        "cuda",
-        "gpu",
-    )
-    return any(marker in lowered for marker in markers)
+    return stage == "experiment"
 
 
 def _command_env(workspace: Path) -> dict[str, str]:

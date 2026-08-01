@@ -72,7 +72,7 @@ def test_command_env_sets_workspace_cache_and_valid_omp(tmp_path, monkeypatch):
     assert (tmp_path / ".cache" / "pip").is_dir()
 
 
-def test_run_one_writes_full_logs_but_only_streams_experiment_progress(tmp_path, monkeypatch, capsys):
+def test_run_one_writes_full_logs_and_streams_all_experiment_output(tmp_path, monkeypatch, capsys):
     from reproagent import runner
 
     monkeypatch.setattr(runner, "find_conda", lambda: None)
@@ -90,7 +90,7 @@ def test_run_one_writes_full_logs_but_only_streams_experiment_progress(tmp_path,
     captured = capsys.readouterr()
 
     assert result.exit_code == 0
-    assert "download noise" not in captured.out
+    assert "download noise" in captured.out
     assert "Epoch 1" in captured.err
     assert result.stdout_path.read_text(encoding="utf-8") == "download noise\n"
     assert result.stderr_path.read_text(encoding="utf-8") == "Epoch 1 | loss 0.5 | Test Acc 0.9\n"
@@ -134,6 +134,24 @@ def test_run_one_suppresses_environment_and_probe_raw_output(tmp_path, monkeypat
     assert "very noisy output" not in captured.out
     assert env_result.stdout_path.read_text(encoding="utf-8") == "very noisy output\n"
     assert probe_result.stdout_path.read_text(encoding="utf-8") == "very noisy output\n"
+
+
+def test_run_one_prints_experiment_heartbeat(tmp_path, monkeypatch, capsys):
+    from reproagent import runner
+
+    monkeypatch.setattr(runner, "find_conda", lambda: None)
+    monkeypatch.setattr(runner, "COMMAND_HEARTBEAT_SECONDS", 0.1)
+    monkeypatch.setattr(
+        runner,
+        "build_backend_command",
+        lambda env_name, command, conda=None: ["python", "-c", "import time; time.sleep(0.35)"],
+    )
+
+    result = runner._run_one("ignored", tmp_path, tmp_path, "experiment", 1, 1, 10, "env")
+    captured = capsys.readouterr()
+
+    assert result.exit_code == 0
+    assert "still running experiment command 1.1" in captured.out
 
 
 def test_run_one_timeout_writes_timeout_to_stderr(tmp_path, monkeypatch):

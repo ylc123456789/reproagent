@@ -165,6 +165,31 @@ def test_validation_accepts_loss_logging_from_completed_coding_agent_patch(tmp_p
     assert not any("training loss" in item for item in validated.needs_user_input)
 
 
+def test_validation_rejects_internal_loss_meter_without_logged_loss(tmp_path):
+    state = _state_with_probe(
+        tmp_path,
+        "Run a bounded GPU experiment and report training loss and test accuracy.",
+        """--nepochs NEPOCHS
+--gpu GPU
+loss_meter = RunningAverageMeter()
+loss_meter.update(loss.item())
+logger.info('Epoch %d | Train Acc %.4f | Test Acc %.4f', epoch, train_acc, test_acc)
+""",
+    )
+    plan = CommandPlan(
+        stage="experiment",
+        summary="Run bounded training; training loss cannot be reported from the unmodified script.",
+        commands=["python examples/odenet_mnist.py --network odenet --nepochs 5 --gpu 0"],
+        assumptions=["The script does not log training loss, so report it as unavailable."],
+        feasibility="ready_to_run",
+    )
+
+    validated = validate_experiment_plan(state, plan)
+
+    assert validated.feasibility == "needs_patch"
+    assert any("training loss" in issue for issue in validated.needs_user_input)
+
+
 def test_validation_rejects_setup_only_experiment_plan(tmp_path):
     state = _state_with_probe(
         tmp_path,

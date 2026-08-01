@@ -35,8 +35,8 @@ def validate_experiment_plan(state: ReproState, plan: CommandPlan) -> CommandPla
     if "gpu" in goal and not _has_gpu_execution_evidence(command_text, plan_text, evidence_text):
         issues.append("Goal asks for GPU execution, but the final plan does not show command-level GPU use or probe evidence that the entry point defaults to CUDA/GPU.")
 
-    if "loss" in goal and _loss_logging_is_uncertain(evidence_text):
-        issues.append("Goal asks for training loss, but probe evidence does not show that the unmodified script prints/logs loss; mark this as needs_patch or explicitly report the metric as unavailable.")
+    if "loss" in goal and (_loss_logging_is_uncertain(evidence_text) or _plan_admits_missing_required_loss(plan_text)):
+        issues.append("Goal asks for training loss, but evidence does not show the final run will print/log loss; mark this as needs_patch instead of treating missing loss as an acceptable deviation.")
 
     if _mentions_any(plan_text, GUESS_MARKERS):
         issues.append("Plan uses guess language such as assume/likely/typical; replace guesses with probe evidence or mark the uncertain requirement as blocked/needs_patch.")
@@ -129,10 +129,23 @@ def _loss_logging_is_uncertain(probe_text: str) -> bool:
             if "loss" in following_block:
                 return False
 
-    lowered_text = probe_text.lower()
-    if "loss_meter" in lowered_text and _mentions_any(lowered_text, LOSS_OUTPUT_MARKERS):
-        return False
     return True
+
+
+def _plan_admits_missing_required_loss(plan_text: str) -> bool:
+    """Return whether the plan admits required loss cannot be reported."""
+    missing_markers = (
+        "loss cannot be reported",
+        "cannot report loss",
+        "cannot be reported",
+        "loss is unavailable",
+        "metric is unavailable",
+        "not log training loss",
+        "does not log training loss",
+        "does not print training loss",
+        "training loss cannot",
+    )
+    return "loss" in plan_text and _mentions_any(plan_text, missing_markers)
 
 
 def _experiment_commands_are_only_setup_or_inspection(commands: list[str]) -> bool:
