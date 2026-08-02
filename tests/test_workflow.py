@@ -48,6 +48,8 @@ def test_plan_only_runs_probe_and_does_not_run_experiment(tmp_path, monkeypatch)
     assert state.planned_experiment.stage == "experiment"
     assert state.probe_attempts
     assert not state.experiment_attempts
+    assert state.reproagent_version is not None
+    assert state.reproagent_version.git_commit
     assert seen_stages == ["probe"]
     assert (task.workspace_dir / "result.md").exists()
 

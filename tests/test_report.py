@@ -82,3 +82,29 @@ def test_write_result_includes_codingagent_path(tmp_path):
     path = write_result(state)
 
     assert f"CodingAgent path: `{tmp_path / 'CodingAgent'}`" in path.read_text(encoding="utf-8")
+
+
+def test_write_result_includes_reproagent_version(tmp_path):
+    from reproagent.models import ReproAgentVersion, ReproState, ReproTask
+    from reproagent.report import write_result
+
+    task = ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path, experiment_goal="Run MNIST.")
+    state = ReproState(
+        task=task,
+        status="completed",
+        reproagent_version=ReproAgentVersion(
+            source_path=tmp_path / "reproagent",
+            git_remote="https://github.com/ylc123456789/reproagent.git",
+            git_branch="main",
+            git_commit="abc123def456",
+            git_dirty=False,
+        ),
+    )
+
+    path = write_result(state)
+    text = path.read_text(encoding="utf-8")
+
+    assert "## ReproAgent Version" in text
+    assert "Git branch: `main`" in text
+    assert "Git commit: `abc123def456`" in text
+    assert "Git dirty: `False`" in text

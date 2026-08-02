@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 from pathlib import Path
 
 from .context import collect_context
@@ -10,7 +11,7 @@ from .audit import audit_environment
 from .env import ensure_environment
 from .integrations.codingagent import configured_codingagent_path
 from .llm import final_review, plan_environment, plan_experiment, plan_probe, revise_after_failure, review_experiment_plan_semantics
-from .models import ReproState, ReproTask, StageResult
+from .models import ReproAgentVersion, ReproState, ReproTask, StageResult
 from .report import save_state, write_result
 from .runner import run_commands
 from .text import normalize_text
@@ -22,12 +23,63 @@ def _log(message: str) -> None:
     print(f"[reproagent] {message}", flush=True)
 
 
+def _current_reproagent_version() -> ReproAgentVersion:
+    """Collect git metadata for the running reproagent checkout."""
+    source_path = Path(__file__).resolve().parents[2]
+    return ReproAgentVersion(
+        source_path=source_path,
+        git_commit=_git_output(source_path, "rev-parse", "HEAD"),
+        git_branch=_git_output(source_path, "branch", "--show-current"),
+        git_dirty=_git_dirty(source_path),
+        git_remote=_git_output(source_path, "config", "--get", "remote.origin.url"),
+    )
+
+
+def _git_output(repo_path: Path, *args: str) -> str | None:
+    """Return one git command output value, or None outside a checkout."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_path), *args],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    output = result.stdout.strip()
+    return output or None
+
+
+def _git_dirty(repo_path: Path) -> bool | None:
+    """Return whether the reproagent checkout has uncommitted changes."""
+    status = _git_output(repo_path, "status", "--porcelain")
+    if status is None:
+        return None
+    return bool(status)
+
+
+def _format_reproagent_version(version: ReproAgentVersion | None) -> str:
+    """Format reproagent version metadata for terminal logs."""
+    if version is None:
+        return "reproagent version: unknown"
+    commit = (version.git_commit or "unknown")[:12]
+    branch = version.git_branch or "unknown-branch"
+    dirty = "dirty" if version.git_dirty else "clean" if version.git_dirty is False else "dirty-unknown"
+    remote = f", remote={version.git_remote}" if version.git_remote else ""
+    return f"reproagent version: {branch}@{commit} ({dirty}){remote}"
+
+
 def run_task(task: ReproTask) -> ReproState:
     """Run the full reproduction workflow for a task."""
     task.workspace_dir.mkdir(parents=True, exist_ok=True)
-    state = ReproState(task=task, status="started")
+    state = ReproState(task=task, status="started", reproagent_version=_current_reproagent_version())
     save_state(state)
     _log(f"workspace: {task.workspace_dir}")
+    _log(_format_reproagent_version(state.reproagent_version))
     _log(f"experiment goal: {task.experiment_goal}")
 
     state.status = "collecting_context"

@@ -50,6 +50,14 @@ class RepoContext(BaseModel):
     paper_url: str = ""
     summary_path: Path | None = None
 
+class ReproAgentVersion(BaseModel):
+    """Record the reproagent code version used for a run."""
+    source_path: Path
+    git_commit: str | None = None
+    git_branch: str | None = None
+    git_dirty: bool | None = None
+    git_remote: str | None = None
+
 class EnvironmentInfo(BaseModel):
     """Represent EnvironmentInfo data."""
     backend: Literal["conda"] = "conda"
@@ -122,6 +130,7 @@ class ReproState(BaseModel):
     """Represent ReproState data."""
     task: ReproTask
     status: str = "created"
+    reproagent_version: ReproAgentVersion | None = None
     repo_context: RepoContext | None = None
     environment: EnvironmentInfo | None = None
     environment_audit: EnvironmentAudit | None = None

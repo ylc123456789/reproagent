@@ -29,6 +29,17 @@ def write_result(state: ReproState):
         f"- CodingAgent path: `{state.task.codingagent_path or 'importable default'}`",
         "",
     ]
+    if state.reproagent_version:
+        version = state.reproagent_version
+        lines += [
+            "## ReproAgent Version", "",
+            f"- Source path: `{version.source_path}`",
+            f"- Git remote: `{version.git_remote or 'unknown'}`",
+            f"- Git branch: `{version.git_branch or 'unknown'}`",
+            f"- Git commit: `{version.git_commit or 'unknown'}`",
+            f"- Git dirty: `{version.git_dirty}`",
+            "",
+        ]
     if state.repo_context:
         lines += [
             "## Context", "",
