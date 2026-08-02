@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
@@ -167,6 +169,9 @@ def choose_next_action(spec: CodeTaskSpec, state: AgentState, context, client: L
         "anchor that includes nearby context instead of a short common line. Use apply_patch only for changes that are not suitable "
         "for exact structured edits. Use finish only after the diff and verification evidence satisfy the task, or when failure is clear. "
         "Never silently change research semantics such as model architecture, loss, optimizer, dataset split, or metric. "
+        "For insert_before/insert_after anchors: prefer 2-4 adjacent lines as anchor, including the line above the target. "
+        "Never use anchors consisting only of whitespace and punctuation (e.g. a closing parenthesis alone). "
+        "When nesting is deep, include the parent construct opening line in the anchor. "
         "Return only JSON matching the schema."
     )
     user = {
@@ -350,6 +355,22 @@ def _build_context(spec: CodeTaskSpec, policy: ContextPolicy):
     )
 
 
+def _check_syntax_after_edit(repo_root, file_path):
+    """Run py_compile on a modified Python file; return error snippet or empty string."""
+    if not file_path.endswith('.py'):
+        return ''
+    try:
+        result = subprocess.run(
+            [sys.executable, '-m', 'py_compile', str(repo_root / file_path)],
+            capture_output=True, text=True, timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ''
+    if result.returncode != 0:
+        return '\n[SYNTAX CHECK FAILED] ' + result.stderr.strip()[-2000:]
+    return ''
+
+
 def _should_continue_past_base_limit(spec: CodeTaskSpec, steps: list[StepRecord]) -> bool:
     """Allow grace steps only after unverified progress."""
     if spec.max_extra_steps_after_progress <= 0:
@@ -434,6 +455,21 @@ def _progress_hints(spec: CodeTaskSpec, steps: list[StepRecord]) -> list[str]:
     if last_change_step and last_verify_step < last_change_step:
         hints.append("Files changed after the last verification; run verification before finish.")
     return hints
+
+
+def _match_count_hint(spec, relative_path, needle, action, occurrence_index):
+    """Return a short note when occurrence_index selects among multiple matches."""
+    if not needle or not occurrence_index:
+        return ''
+    try:
+        path = ensure_path_allowed(spec.repo_path, relative_path, spec.allowed_paths or None)
+        text = path.read_text(encoding='utf-8', errors='ignore')
+        count = len(find_all(text, needle))
+        if count > 1:
+            return f' (occurrence {occurrence_index}/{count})'
+    except Exception:
+        pass
+    return ''
 
 
 def _execute_structured_edit_with_repair(
@@ -609,19 +645,23 @@ def _execute_structured_edit(spec: CodeTaskSpec, action: ControllerAction, outpu
     if action.action == "replace_text":
         if action.old_text is None or action.new_text is None:
             raise ValueError("replace_text requires old_text and new_text")
+        match_hint = _match_count_hint(spec, action.path, action.old_text, "replace_text", action.occurrence_index)
         changed = replace_text_once(spec.repo_path, action.path, action.old_text, action.new_text, spec.allowed_paths, action.occurrence_index)
     elif action.action == "insert_before":
         if action.anchor_text is None or action.insert_text is None:
             raise ValueError("insert_before requires anchor_text and insert_text")
+        match_hint = _match_count_hint(spec, action.path, action.anchor_text, "insert_before", action.occurrence_index)
         changed = insert_before_anchor(spec.repo_path, action.path, action.anchor_text, action.insert_text, spec.allowed_paths, action.occurrence_index)
     elif action.action == "insert_after":
         if action.anchor_text is None or action.insert_text is None:
             raise ValueError("insert_after requires anchor_text and insert_text")
+        match_hint = _match_count_hint(spec, action.path, action.anchor_text, "insert_after", action.occurrence_index)
         changed = insert_after_anchor(spec.repo_path, action.path, action.anchor_text, action.insert_text, spec.allowed_paths, action.occurrence_index)
     else:
         raise ValueError(f"unsupported structured edit: {action.action}")
     diff_path = write_diff(current_diff(spec.repo_path), output_dir)
-    return [changed], f"Structured edit {action.action} applied to {changed}. Current diff written to {diff_path}."
+    syntax_note = _check_syntax_after_edit(spec.repo_path, changed)
+    return [changed], f"Structured edit {action.action}{match_hint} applied to {changed}. Current diff written to {diff_path}.{syntax_note}"
 
 
 def _apply_patch_with_repair(
@@ -643,7 +683,8 @@ def _apply_patch_with_repair(
             diff_path = write_diff(current_diff(spec.repo_path), output_dir)
             suffix = "" if attempt == 1 else f" after {attempt - 1} repair attempt(s)"
             notes = f" Repair notes: {'; '.join(repair_notes)}" if repair_notes else ""
-            return changed, f"Patch applied{suffix}. Current diff written to {diff_path}.{notes}"
+            syntax_notes = "".join(_check_syntax_after_edit(spec.repo_path, p) for p in changed)
+            return changed, f"Patch applied{suffix}. Current diff written to {diff_path}.{notes}{syntax_notes}"
         except (PatchApplyError, SafetyError) as exc:
             stderr = getattr(exc, "stderr", "") or str(exc)
             errors.append(stderr)
