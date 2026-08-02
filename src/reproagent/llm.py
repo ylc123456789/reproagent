@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import os
+from datetime import datetime
 import urllib.request
 
 from .models import CommandPlan, ReproState
@@ -107,14 +108,22 @@ Plan commands:
 Plan assumptions:
 {chr(10).join(f"- {item}" for item in plan.assumptions) or "- none"}
 
+Existing hard-validation or user-input issues:
+{chr(10).join(f"- {item}" for item in plan.needs_user_input) or "- none"}
+
+Current feasibility:
+{plan.feasibility or "unknown"}
+
 Rules:
 - The final experiment stage must directly attempt the user experiment goal.
 - CodingAgent verification commands are only patch verification evidence; they do not count as the final ReproAgent experiment stage.
 - Dependency installs, import/version checks, --help, grep/sed/find/cat, and smoke checks are not sufficient final experiment commands.
+- If the goal asks for a metric such as training loss, the final run must clearly print/log that metric. If the repo computes the metric internally but does not report it, return an issue saying this requires a repo-local patch.
 - If the goal says bounded, GPU, specific entry point, dataset, metric, or runtime evidence, the final commands must reflect those requirements explicitly or explain why blocked.
+- If the command uses CLI flags, compare them to discovered help/log evidence; nonexistent flags or flags missing required values are issues.
 - If the plan is acceptable, return {{"issues": []}}.
 """
-    text = _openai_compatible_text(state, prompt)
+    text = _call_llm_text(state, prompt, trace_label="experiment_semantic_review")
     data = _loads_plan_json(text)
     return normalize_text_list(_as_list(data.get("issues", []), drop_false=True))
 
@@ -127,14 +136,14 @@ def final_review(state: ReproState) -> str:
 
 Write a concise reproduction result summary. Explain the experiment goal, what worked, what failed, whether the goal was achieved or only partially achieved, what metrics were found, whether the run used GPU or CPU fallback, and what human input is needed next. If CodingAgent changed files, explicitly describe the run as using a repo-local patch and do not claim the original code ran without modification. Return plain Markdown.
 """
-    return normalize_text(_openai_compatible_text(state, prompt))
+    return normalize_text(_call_llm_text(state, prompt, trace_label="final_review"))
 
 
 def _complete_plan(state: ReproState, prompt: str, stage: str) -> CommandPlan:
     """Call the LLM and normalize a command plan."""
     if state.task.mock_llm:
         return _mock_plan(stage)
-    text = _openai_compatible_text(state, prompt)
+    text = _call_llm_text(state, prompt, trace_label=f"{stage}_plan")
     data = _loads_plan_json(text)
     returned_stage = data.get("stage", stage)
     if returned_stage not in {"environment", "probe", "experiment"}:
@@ -184,7 +193,17 @@ def _as_list(value, drop_false: bool = False) -> list[str]:
     return [str(value)]
 
 
-def _openai_compatible_text(state: ReproState, prompt: str) -> str:
+def _call_llm_text(state: ReproState, prompt: str, trace_label: str) -> str:
+    """Call the configured LLM while preserving legacy test doubles."""
+    try:
+        return _openai_compatible_text(state, prompt, trace_label=trace_label)
+    except TypeError as exc:
+        if "trace_label" not in str(exc):
+            raise
+        return _openai_compatible_text(state, prompt)
+
+
+def _openai_compatible_text(state: ReproState, prompt: str, trace_label: str | None = None) -> str:
     """Call an OpenAI-compatible chat completion API."""
     api_key = os.environ.get(state.task.api_key_env)
     if not api_key:
@@ -207,7 +226,21 @@ def _openai_compatible_text(state: ReproState, prompt: str) -> str:
     )
     with urllib.request.urlopen(req, timeout=120) as resp:
         data = json.loads(resp.read().decode("utf-8"))
-    return data["choices"][0]["message"]["content"].strip()
+    text = data["choices"][0]["message"]["content"].strip()
+    if trace_label:
+        _write_llm_trace(state, trace_label, prompt, text)
+    return text
+
+
+def _write_llm_trace(state: ReproState, trace_label: str, prompt: str, response: str) -> None:
+    """Persist raw LLM prompt/response pairs for debugging."""
+    safe_label = re.sub(r"[^A-Za-z0-9_.-]+", "_", trace_label).strip("_") or "llm"
+    logs_dir = state.task.workspace_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+    prefix = logs_dir / f"llm_{stamp}_{safe_label}"
+    (prefix.with_suffix(".prompt.txt")).write_text(prompt, encoding="utf-8")
+    (prefix.with_suffix(".response.txt")).write_text(response, encoding="utf-8")
 
 
 def _chat_completions_url(api_base: str) -> str:

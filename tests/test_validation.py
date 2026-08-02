@@ -1,5 +1,5 @@
 from reproagent.models import CommandPlan, CommandResult, RepoContext, ReproState, ReproTask, StageResult
-from reproagent.validation import validate_experiment_plan
+from reproagent.validation import annotate_plan_with_validation_issues, validate_experiment_plan
 
 
 def _state_with_probe(tmp_path, goal, probe_text):
@@ -101,7 +101,7 @@ def test_validation_flags_shell_logging_and_missing_budget(tmp_path):
 
 def test_validation_accepts_gpu_default_probe_evidence(tmp_path):
     from reproagent.models import CommandPlan, CommandResult, RepoContext, ReproState, ReproTask, StageResult
-    from reproagent.validation import validate_experiment_plan
+    from reproagent.validation import annotate_plan_with_validation_issues, validate_experiment_plan
 
     probe_stdout = tmp_path / "probe.stdout"
     probe_stdout.write_text("--gpu GPU\nparser.add_argument('--gpu', type=int, default=0)\ndevice = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')", encoding="utf-8")
@@ -188,6 +188,83 @@ logger.info('Epoch %d | Train Acc %.4f | Test Acc %.4f', epoch, train_acc, test_
 
     assert validated.feasibility == "needs_patch"
     assert any("training loss" in issue for issue in validated.needs_user_input)
+
+
+def test_validation_rejects_cross_entropy_near_logger_as_loss_output(tmp_path):
+    state = _state_with_probe(
+        tmp_path,
+        "Run a bounded GPU experiment and report training loss and test accuracy.",
+        """--nepochs NEPOCHS
+--gpu GPU
+logger.info(model)
+logger.info('Number of parameters: {}'.format(count_parameters(model)))
+
+criterion = nn.CrossEntropyLoss().to(device)
+
+logger.info('Epoch {:04d} | Train Acc {:.4f} | Test Acc {:.4f}'.format(epoch, train_acc, val_acc))
+""",
+    )
+    plan = CommandPlan(
+        stage="experiment",
+        summary="Run bounded training",
+        commands=["python examples/odenet_mnist.py --network odenet --nepochs 1 --gpu 0"],
+        assumptions=["The script reports train and test accuracy."],
+        feasibility="ready_to_run",
+    )
+
+    validated = validate_experiment_plan(state, plan)
+
+    assert validated.feasibility == "needs_patch"
+    assert any("training loss" in issue for issue in validated.needs_user_input)
+
+
+def test_validation_rejects_help_and_unknown_cli_flags_in_experiment(tmp_path):
+    state = _state_with_probe(
+        tmp_path,
+        "Run a bounded GPU experiment and report test accuracy.",
+        """usage: odenet_mnist.py [-h] [--nepochs NEPOCHS] [--batch_size BATCH_SIZE] [--adjoint {True,False}] [--gpu GPU]
+  --nepochs NEPOCHS
+  --batch_size BATCH_SIZE
+  --adjoint {True,False}
+  --gpu GPU
+""",
+    )
+    plan = CommandPlan(
+        stage="experiment",
+        summary="Run bounded training",
+        commands=[
+            "python examples/odenet_mnist.py --help",
+            "python examples/odenet_mnist.py --gpu 0 --adjoint --epochs 1 --batch-size 128",
+        ],
+        assumptions=[],
+        feasibility="ready_to_run",
+    )
+
+    validated = validate_experiment_plan(state, plan)
+
+    assert validated.feasibility == "needs_config"
+    assert any("--help" in issue for issue in validated.needs_user_input)
+    assert any("`--epochs`" in issue for issue in validated.needs_user_input)
+    assert any("`--batch-size`" in issue and "`--batch_size`" in issue for issue in validated.needs_user_input)
+    assert any("`--adjoint` without the value" in issue for issue in validated.needs_user_input)
+
+
+def test_semantic_validation_issue_can_require_patch():
+    plan = CommandPlan(
+        stage="experiment",
+        summary="Run experiment",
+        commands=["python train.py --epochs 1"],
+        assumptions=[],
+        feasibility="ready_to_run",
+    )
+
+    validated = annotate_plan_with_validation_issues(
+        plan,
+        ["Goal asks for training loss, but this requires a repo-local patch to print it."],
+    )
+
+    assert validated.feasibility == "needs_patch"
+    assert any("repo-local patch" in issue for issue in validated.needs_user_input)
 
 
 def test_validation_rejects_setup_only_experiment_plan(tmp_path):

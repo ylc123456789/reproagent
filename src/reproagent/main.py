@@ -265,14 +265,13 @@ def _validated_experiment_plan(state: ReproState):
 def _validate_experiment_plan(state: ReproState, plan):
     """Apply hard and semantic experiment-plan validation."""
     validated = validate_experiment_plan(state, plan)
-    if validated is plan and validated.feasibility == "ready_to_run":
-        try:
-            issues = review_experiment_plan_semantics(state, validated)
-        except Exception as exc:
-            _log(f"semantic plan review skipped: {exc}")
-            issues = []
-        if issues:
-            validated = annotate_plan_with_validation_issues(validated, issues)
+    try:
+        issues = review_experiment_plan_semantics(state, validated)
+    except Exception as exc:
+        _log(f"semantic plan review skipped: {exc}")
+        issues = []
+    if issues:
+        validated = annotate_plan_with_validation_issues(validated, issues)
     if validated is not plan and validated.needs_user_input:
         _log("plan validation flagged issues")
     return validated
