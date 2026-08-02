@@ -55,11 +55,27 @@ def _git_output(repo_path: Path, *args: str) -> str | None:
 
 
 def _git_dirty(repo_path: Path) -> bool | None:
-    """Return whether the reproagent checkout has uncommitted changes."""
-    status = _git_output(repo_path, "status", "--porcelain")
-    if status is None:
+    """Return whether tracked reproagent files differ from HEAD."""
+    try:
+        worktree = subprocess.run(
+            ["git", "-C", str(repo_path), "diff", "--quiet", "--"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+        index = subprocess.run(
+            ["git", "-C", str(repo_path), "diff", "--cached", "--quiet", "--"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+    except Exception:
         return None
-    return bool(status)
+    if worktree.returncode not in {0, 1} or index.returncode not in {0, 1}:
+        return None
+    return worktree.returncode == 1 or index.returncode == 1
 
 
 def _format_reproagent_version(version: ReproAgentVersion | None) -> str:
@@ -89,6 +105,7 @@ def run_task(task: ReproTask) -> ReproState:
     except Exception as exc:
         state.status = "failed"
         state.final_summary = f"Context collection failed: {exc}"
+        _log(state.final_summary)
         write_result(state)
         return state
     save_state(state)
@@ -100,6 +117,7 @@ def run_task(task: ReproTask) -> ReproState:
     except Exception as exc:
         state.status = "failed"
         state.final_summary = f"Environment preparation failed: {exc}"
+        _log(state.final_summary)
         write_result(state)
         return state
     save_state(state)
@@ -414,6 +432,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--paper", required=True, help="Paper URL, e.g. arXiv link")
     run.add_argument("--repo", required=True, help="Git repository URL")
     run.add_argument("--workspace", required=True, type=Path, help="Run workspace directory")
+    run.add_argument("--repo-cache-dir", type=Path, default=None, help="Optional local cache directory for cloned paper repositories")
     run.add_argument("--mock-llm", action="store_true", help="Use deterministic mock LLM for local tests")
     run.add_argument("--model", default=None, help="OpenAI-compatible model name")
     run.add_argument("--api-base", default="https://api.openai.com/v1", help="OpenAI-compatible API base URL")
@@ -446,6 +465,7 @@ def main(argv: list[str] | None = None) -> None:
             paper_url=args.paper,
             repo_url=args.repo,
             workspace_dir=args.workspace,
+            repo_cache_dir=args.repo_cache_dir,
             mock_llm=args.mock_llm,
             model=args.model,
             api_base=args.api_base,

@@ -20,6 +20,7 @@ class ReproTask(BaseModel):
     paper_url: str
     repo_url: str
     workspace_dir: Path
+    repo_cache_dir: Path | None = None
     task_id: str = Field(default_factory=_task_id)
     max_env_attempts: int = 3
     max_run_attempts: int = 3

@@ -25,6 +25,7 @@ def write_result(state: ReproState):
         f"- Paper: {state.task.paper_url}",
         f"- Repo: {state.task.repo_url}",
         f"- Backend: {state.task.backend}",
+        f"- Repo cache dir: `{state.task.repo_cache_dir or 'not configured'}`",
         f"- Experiment goal: {state.task.experiment_goal or 'not specified'}",
         f"- CodingAgent path: `{state.task.codingagent_path or 'importable default'}`",
         "",

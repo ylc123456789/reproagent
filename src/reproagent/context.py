@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 import shutil
 import subprocess
 import time
@@ -26,16 +28,23 @@ def clone_repo(task: ReproTask) -> Path:
         _remove_path(repo_path)
 
     repo_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_dir = _repo_cache_dir(task)
+    if cache_dir is not None:
+        cached = _clone_from_cache(task.repo_url, repo_path, cache_dir, log_dir)
+        if cached is not None:
+            return cached
+
     latest_error = ""
     for attempt in range(1, CLONE_ATTEMPTS + 1):
         result = _run_clone(task.repo_url, repo_path)
         _write_clone_logs(log_dir, result, attempt)
         latest_error = (result.stderr or "").strip() or (result.stdout or "").strip()
         if result.returncode == 0 and _is_usable_repo(repo_path):
+            _refresh_cache_from_repo(repo_path, task.repo_url, cache_dir, log_dir)
             return repo_path
         _remove_path(repo_path)
         if attempt < CLONE_ATTEMPTS:
-            time.sleep(min(2 * attempt, 10))
+            time.sleep(min(5 * attempt, 30))
 
     raise RuntimeError(f"git clone failed after {CLONE_ATTEMPTS} attempts: {latest_error}")
 
@@ -90,6 +99,74 @@ Commit: `{commit or 'unknown'}`
         paper_url=task.paper_url,
         summary_path=summary_path,
     )
+
+
+def _repo_cache_dir(task: ReproTask) -> Path | None:
+    """Return the optional repository cache directory."""
+    value = task.repo_cache_dir or os.environ.get("REPROAGENT_REPO_CACHE_DIR")
+    return Path(value).expanduser() if value else None
+
+
+def _clone_from_cache(repo_url: str, repo_path: Path, cache_dir: Path, log_dir: Path) -> Path | None:
+    """Clone the target repo from a local cache when available."""
+    cached_repo = _cached_repo_path(cache_dir, repo_url)
+    cached_repo.parent.mkdir(parents=True, exist_ok=True)
+    if not _is_usable_repo(cached_repo):
+        _remove_path(cached_repo)
+        result = _run_clone(repo_url, cached_repo)
+        _write_named_logs(log_dir, "clone_cache_seed", result)
+        if result.returncode != 0 or not _is_usable_repo(cached_repo):
+            _remove_path(cached_repo)
+            return None
+    else:
+        _refresh_cached_repo(cached_repo, log_dir)
+
+    result = _run_clone(str(cached_repo), repo_path)
+    _write_named_logs(log_dir, "clone_cache", result)
+    if result.returncode == 0 and _is_usable_repo(repo_path):
+        return repo_path
+    _remove_path(repo_path)
+    return None
+
+
+def _refresh_cache_from_repo(repo_path: Path, repo_url: str, cache_dir: Path | None, log_dir: Path) -> None:
+    """Best-effort copy of a successful network clone into the local cache."""
+    if cache_dir is None:
+        return
+    cached_repo = _cached_repo_path(cache_dir, repo_url)
+    if _is_usable_repo(cached_repo):
+        return
+    cached_repo.parent.mkdir(parents=True, exist_ok=True)
+    result = _run_clone(str(repo_path), cached_repo)
+    _write_named_logs(log_dir, "clone_cache_store", result)
+    if result.returncode != 0 or not _is_usable_repo(cached_repo):
+        _remove_path(cached_repo)
+
+
+def _refresh_cached_repo(cached_repo: Path, log_dir: Path) -> None:
+    """Best-effort refresh of an existing cached checkout."""
+    result = subprocess.run(
+        ["git", "-C", str(cached_repo), "pull", "--ff-only"],
+        text=True,
+        capture_output=True,
+        timeout=CLONE_TIMEOUT_SECONDS,
+    )
+    _write_named_logs(log_dir, "clone_cache_refresh", result)
+
+
+def _cached_repo_path(cache_dir: Path, repo_url: str) -> Path:
+    """Return a stable cache path for a repository URL."""
+    name = repo_url.rstrip("/").rsplit("/", 1)[-1]
+    if name.endswith(".git"):
+        name = name[:-4]
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("_") or "repo"
+    return cache_dir / slug
+
+
+def _write_named_logs(log_dir: Path, name: str, result: subprocess.CompletedProcess[str]) -> None:
+    """Write stdout/stderr logs for non-attempt clone helpers."""
+    (log_dir / f"{name}.stdout").write_text(result.stdout or "", encoding="utf-8", errors="replace")
+    (log_dir / f"{name}.stderr").write_text(result.stderr or "", encoding="utf-8", errors="replace")
 
 
 def _run_clone(repo_url: str, repo_path: Path) -> subprocess.CompletedProcess[str]:
