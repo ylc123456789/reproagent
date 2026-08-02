@@ -62,13 +62,9 @@ def test_command_env_sets_workspace_cache_and_valid_omp(tmp_path, monkeypatch):
 
     env = _command_env(tmp_path)
 
-    assert env["TMPDIR"] == str(tmp_path / ".tmp")
-    assert env["TMP"] == str(tmp_path / ".tmp")
-    assert env["TEMP"] == str(tmp_path / ".tmp")
     assert env["PIP_CACHE_DIR"] == str(tmp_path / ".cache" / "pip")
     assert env["OMP_NUM_THREADS"] == "16"
     assert env["PYTHONUNBUFFERED"] == "1"
-    assert (tmp_path / ".tmp").is_dir()
     assert (tmp_path / ".cache" / "pip").is_dir()
 
 

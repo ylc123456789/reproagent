@@ -179,13 +179,8 @@ def _should_display_line(stage: str, line: str) -> bool:
 def _command_env(workspace: Path) -> dict[str, str]:
     """Build the subprocess environment for a command."""
     env = os.environ.copy()
-    tmp_dir = workspace / ".tmp"
     pip_cache_dir = workspace / ".cache" / "pip"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
     pip_cache_dir.mkdir(parents=True, exist_ok=True)
-    env["TMPDIR"] = str(tmp_dir)
-    env["TMP"] = str(tmp_dir)
-    env["TEMP"] = str(tmp_dir)
     env["PIP_CACHE_DIR"] = str(pip_cache_dir)
     env.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
     env.setdefault("PYTHONUNBUFFERED", "1")

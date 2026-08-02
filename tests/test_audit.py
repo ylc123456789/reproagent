@@ -130,5 +130,4 @@ def test_audit_uses_sanitized_command_environment(tmp_path, monkeypatch):
 
     assert audit.success
     assert captured["env"]["OMP_NUM_THREADS"] == "16"
-    assert captured["env"]["TMPDIR"] == str(tmp_path / ".tmp")
     assert captured["env"]["PIP_CACHE_DIR"] == str(tmp_path / ".cache" / "pip")
