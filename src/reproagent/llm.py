@@ -119,7 +119,12 @@ Rules:
 - CodingAgent verification commands are only patch verification evidence; they do not count as the final ReproAgent experiment stage.
 - Dependency installs, import/version checks, --help, grep/sed/find/cat, and smoke checks are not sufficient final experiment commands.
 - If the goal asks for a metric such as training loss, the final run must clearly print/log that metric. If the repo computes the metric internally but does not report it, return an issue saying this requires a repo-local patch.
-- If the goal says bounded, GPU, specific entry point, dataset, metric, or runtime evidence, the final commands must reflect those requirements explicitly or explain why blocked.
+- For each requirement keyword in the experiment goal, verify the plan satisfies it in substance, not just form:
+  * "bounded" / "short" / "few epoch" → the plan must explicitly REDUCE epochs/steps below the script default. Using the default --nepochs value (e.g. 160) is NOT bounded. A bounded run should set --nepochs to 10 or fewer unless the script default is already that low.
+  * "GPU" → the command must include a GPU flag or there must be probe evidence that the script defaults to CUDA.
+  * "report <metric>" / "report training loss" → the script output must actually print/log that metric (check probe evidence). Do not assume it does.
+  * "runtime" → the plan must capture elapsed time (time wrapper, timer in script output, etc).
+- If the goal mentions a specific entry point, dataset, or config, verify the commands explicitly reference it.
 - If the command uses CLI flags, compare them to discovered help/log evidence; nonexistent flags or flags missing required values are issues.
 - If the plan is acceptable, return {{"issues": []}}.
 """

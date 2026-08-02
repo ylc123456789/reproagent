@@ -98,8 +98,11 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
             for thread in threads:
                 thread.start()
             code = _wait_for_process(process, timeout, stage, attempt, index, stdout_path, stderr_path)
+            for stream in (process.stdout, process.stderr):
+                if stream is not None and not stream.closed:
+                    stream.close()
             for thread in threads:
-                thread.join(timeout=1)
+                thread.join()
     except subprocess.TimeoutExpired:
         if process is not None:
             process.kill()
@@ -153,8 +156,11 @@ def _stream_pipe(pipe, display, log_file, chunks: list[str], stage: str) -> None
             if char == "":
                 break
             chunks.append(char)
-            log_file.write(char)
-            log_file.flush()
+            try:
+                log_file.write(char)
+                log_file.flush()
+            except (ValueError, OSError):
+                break
             pending.append(char)
             if char in ("\n", "\r"):
                 _display_chunk_if_relevant(stage, "".join(pending), display)
