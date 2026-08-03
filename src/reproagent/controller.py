@@ -306,6 +306,9 @@ def run_controller(task: ReproTask) -> AgentState:
     version = _current_reproagent_version()
     _log(f"workspace: {task.workspace_dir}")
     _log(_format_version(version))
+    if task.dataset_cache_dir:
+        import os as _os
+        _os.environ["REPROAGENT_DATASET_CACHE"] = task.dataset_cache_dir
 
     # ── init ──────────────────────────────────────────────────
     if task.mock_llm:

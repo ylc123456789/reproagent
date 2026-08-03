@@ -28,6 +28,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--experiment-goal", required=True, help="Concrete reproduction goal")
     run.add_argument("--confirm-before-experiment", action="store_true",
                      help="Ask for confirmation before running experiment commands")
+    run.add_argument("--dataset-cache", default="",
+                     help="Shared dataset cache directory (torchvision/HF/torch.hub will auto-cache here)")
     run.add_argument("--enable-coding-agent", action="store_true", help="Allow CodingAgent to modify repo code")
     run.add_argument("--max-coding-agent-steps", type=int, default=24, help="Max CodingAgent steps per patch")
     run.add_argument("--codingagent-path", type=Path, default=None, help="Path to CodingAgent checkout")
@@ -64,6 +66,7 @@ def main(argv: list[str] | None = None) -> None:
             mirror_profile=args.mirror_profile,
             mirror_strict=args.mirror_strict,
             confirm_before_experiment=args.confirm_before_experiment,
+            dataset_cache_dir=args.dataset_cache,
         )
         state = run_controller(task)
         print(f"status: {state.status}")

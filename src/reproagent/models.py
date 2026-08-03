@@ -40,6 +40,7 @@ class ReproTask(BaseModel):
     mirror_profile: MirrorProfile = "none"
     mirror_strict: bool = False
     confirm_before_experiment: bool = False
+    dataset_cache_dir: str = ""
 
 
 class RepoContext(BaseModel):

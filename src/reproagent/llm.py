@@ -95,13 +95,17 @@ def build_context_block(task: ReproTask, repo_context: RepoContext, environment:
     else:
         env_text += " (reused — may already have packages)"
 
+    cache_line = ""
+    if task.dataset_cache_dir:
+        cache_line = f"\nDataset cache: {task.dataset_cache_dir} (torchvision, HuggingFace, and torch.hub will auto-cache there)"
+
     return f"""## Task
 
 Paper: {task.paper_url}
 Repo: {task.repo_url} (cloned at {repo_context.repo_path}, commit {repo_context.commit_hash or 'unknown'})
 Experiment goal: {task.experiment_goal}
 Timeout: {task.timeout_seconds}s per command batch
-Max steps: {task.max_steps}
+Max steps: {task.max_steps}{cache_line}
 
 ## Environment
 
