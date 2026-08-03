@@ -136,11 +136,19 @@ def _should_continue_past_base_limit(spec: CodeTaskSpec, steps: list[StepRecord]
 
 
 def _final_status(requested_status: str | None, changed_files: list[str], verification_results, verification_required: bool) -> str:
-    """Combine requested finish status with verification evidence."""
-    evidence_status = _status_from_verification(changed_files, verification_results)
-    if requested_status == "completed" and verification_required and evidence_status != "completed":
-        return evidence_status
-    return requested_status or evidence_status
+    """Return the finish status.
+
+    The agent's explicit finish status is authoritative --- it has semantic
+    understanding of whether the task succeeded.  Verification results are
+    evidence for the caller to inspect but do not override the agent's judgment.
+
+    When the agent did *not* provide a status (error, budget exhaustion, or
+    ask_user without an explicit marker), fall back to a conservative inference
+    from changed files and verification results.
+    """
+    if requested_status:
+        return requested_status
+    return _status_from_verification(changed_files, verification_results)
 
 
 def _status_from_verification(changed_files: list[str], verification_results) -> str:
