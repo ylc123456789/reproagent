@@ -296,7 +296,7 @@ def _run_stage_loop(state: ReproState, stage: str, max_attempts: int) -> bool:
             state.experiment_attempts.append(stage_result)
         save_state(state)
 
-        if stage == "environment" and (stage_result.success or not plan.commands):
+        if stage == "environment":
             state.status = "auditing_environment"
             _log("auditing environment")
             state.environment_audit = audit_environment(state)
