@@ -58,6 +58,7 @@ Format:
 ### Environment setup
 - ALWAYS run pip install / package setup BEFORE any import or version check.
   A failed import does NOT mean setup failed — it means you tried to import before installing.
+- Follow the mirror policy exactly — use domestic mirrors for all pip installs when configured.
 - When an NVIDIA GPU is visible, prioritize GPU-capable PyTorch/TensorFlow/JAX builds
   compatible with the reported driver/CUDA version.
 - Follow the mirror policy from the context when choosing package indexes.
@@ -127,16 +128,26 @@ Begin. Think step by step, one action at a time. What is your first action?"""
 def _mirror_block(task: ReproTask) -> str:
     profile = task.mirror_profile
     if profile == "none":
-        return "Mirror policy: none. Use official package indexes or the repo instructions."
+        return "Mirror policy: none. Use the repository instructions, the current pip/conda configuration, or official package indexes as appropriate."
     strict = "strict" if task.mirror_strict else "preferred"
-    lines = [f"Mirror policy: {profile} ({strict})."]
-    if profile in ("cn", "autodl"):
-        lines.append("For pip packages, prefer: -i https://mirrors.aliyun.com/pypi/simple")
-        lines.append("Avoid --index-url https://download.pytorch.org/whl/ — it overrides domestic mirrors.")
+    lines = [
+        f"Mirror policy: {profile} ({strict}). Prefer the configured mirror profile for dependency downloads.",
+        "For ordinary pip packages: use -i https://mirrors.aliyun.com/pypi/simple",
+        "Avoid --index-url https://download.pytorch.org/whl/... — it overrides domestic/server pip mirrors and often downloads slowly from international PyTorch hosts.",
+        "Install the GPU ML framework BEFORE pip install -e . when the repo has broad dependencies like torch>=x, so editable install does not pull an incompatible/latest framework build.",
+    ]
     if profile == "autodl":
-        lines.append("Only use aliyun PyTorch wheel find-links when a +cuXXX local-version wheel is required and available.")
+        lines += [
+            "AutoDL: prefer plain pip pins such as `pip install torch==2.6.0 torchvision==0.21.0` and remove PyTorch official -f/--index-url options so installation uses the domestic pip source configured on the instance.",
+            "Only use aliyun PyTorch wheel find-links like -f https://mirrors.aliyun.com/pytorch-wheels/cu124/ when an explicit local-version wheel such as torch==2.6.0+cu124 is required AND available from that mirror.",
+        ]
+    elif profile == "cn":
+        lines.append(
+            "For explicit PyTorch local-version CUDA wheels, prefer a domestic find-links mirror such as "
+            "-f https://mirrors.aliyun.com/pytorch-wheels/cu124/ when the matching CUDA wheel page exists."
+        )
     if task.mirror_strict:
-        lines.append("Strict mode: if a package is unavailable from the mirror, report it instead of falling back to official indexes.")
+        lines.append("Strict mirror mode: if a required package or GPU wheel is unavailable from the preferred mirror, report it instead of silently falling back to official international indexes.")
     return "\n".join(lines)
 
 
