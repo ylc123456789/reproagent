@@ -10,12 +10,11 @@ from .coding import run_coding_agent_for_patch
 from .audit import audit_environment
 from .env import ensure_environment
 from .integrations.codingagent import configured_codingagent_path
-from .llm import final_review, plan_environment, plan_experiment, plan_probe, revise_after_failure, review_experiment_plan_semantics
+from .llm import final_review, plan_environment, plan_experiment, plan_probe, revise_after_failure, review_experiment_plan, apply_review_to_plan
 from .models import ReproAgentVersion, ReproState, ReproTask, StageResult
 from .report import save_state, write_result
 from .runner import run_commands
 from .text import normalize_text
-from .validation import annotate_plan_with_validation_issues, validate_experiment_plan
 
 
 def _log(message: str) -> None:
@@ -261,14 +260,16 @@ def _run_stage_loop(state: ReproState, stage: str, max_attempts: int) -> bool:
                     save_state(state)
                     return False
 
-            if plan.feasibility and plan.feasibility != "ready_to_run":
-                _log(f"experiment not executed because plan feasibility is {plan.feasibility}")
-                state.experiment_attempts.append(StageResult(stage=stage, attempt=attempt, plan=plan, results=[]))
-                save_state(state)
-                if _can_replan_experiment(plan, attempt, max_attempts):
-                    _log("retrying experiment planning with validation feedback")
-                    continue
-                return False
+            # All other non-ready states (needs_config, blocked, etc.) — retry if
+            # attempts remain.  The LLM will see the issues via revise_after_failure
+            # and fix them in the next attempt.
+            _log(f"experiment not executed because plan feasibility is {plan.feasibility}")
+            state.experiment_attempts.append(StageResult(stage=stage, attempt=attempt, plan=plan, results=[]))
+            save_state(state)
+            if attempt < max_attempts:
+                _log("retrying experiment planning with validation feedback")
+                continue
+            return False
         if stage == "experiment" and state.task.confirm_before_experiment and not _confirm_experiment(plan):
             _log("experiment cancelled by user before command execution")
             state.experiment_attempts.append(StageResult(stage=stage, attempt=attempt, plan=plan, results=[]))
@@ -310,10 +311,6 @@ def _run_stage_loop(state: ReproState, stage: str, max_attempts: int) -> bool:
 
 
 
-def _can_replan_experiment(plan, attempt: int, max_attempts: int) -> bool:
-    """Return whether experiment validation should trigger another plan."""
-    return attempt < max_attempts and plan.feasibility == "needs_config"
-
 
 def _stage_succeeded(stage: str, stage_result: StageResult) -> bool:
     """Return whether a stage attempt succeeded."""
@@ -333,16 +330,14 @@ def _validated_experiment_plan(state: ReproState):
 
 
 def _validate_experiment_plan(state: ReproState, plan):
-    """Apply hard and semantic experiment-plan validation."""
-    validated = validate_experiment_plan(state, plan)
+    """Ask the LLM to review its own plan and annotate it with any issues found."""
     try:
-        issues = review_experiment_plan_semantics(state, validated)
+        review = review_experiment_plan(state, plan)
     except Exception as exc:
-        _log(f"semantic plan review skipped: {exc}")
-        issues = []
-    if issues:
-        validated = annotate_plan_with_validation_issues(validated, issues)
-    if validated is not plan and validated.needs_user_input:
+        _log(f"plan review skipped: {exc}")
+        return plan
+    validated = apply_review_to_plan(plan, review)
+    if not review.get("ready"):
         _log("plan validation flagged issues")
     return validated
 

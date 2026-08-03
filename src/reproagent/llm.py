@@ -73,28 +73,53 @@ Do not use cd, tee, shell log redirection, or conda activate; commands already r
 
 def revise_after_failure(state: ReproState, stage: str) -> CommandPlan:
     """Ask the LLM to revise a stage plan after failed execution or validation."""
-    prompt = _base_context(state) + _recent_logs(state) + f"""
+    previous_issues: list[str] = []
+    if stage == "experiment":
+        attempts = state.experiment_attempts
+    elif stage == "environment":
+        attempts = state.environment_attempts
+    else:
+        attempts = state.probe_attempts
+    if attempts:
+        last = attempts[-1]
+        if last.plan.needs_user_input:
+            previous_issues = last.plan.needs_user_input
+
+    feedback_block = ""
+    if previous_issues:
+        feedback_block = "\nIssues from the previous attempt that MUST be fixed:\n"
+        feedback_block += "\n".join(f"- {item}" for item in previous_issues)
+
+    prompt = _base_context(state) + _recent_logs(state) + feedback_block + f"""
 
 The previous {stage} attempt failed or the environment audit required repair. Diagnose the logs and propose a revised {stage} command plan.
 Return JSON with fields: stage, summary, commands, assumptions, stop_reason.
 If the audit says GPU repair is required, fix the installed ML framework build so GPU is available on this hardware, unless the repo clearly does not use that framework. Prefer explicit uninstall/reinstall commands for incompatible packages when needed.
 If the audit says NumPy ABI repair is required, pin or downgrade NumPy, commonly `pip install "numpy<2"`, then rerun a quick import/device check.
 For environment-stage revisions, do not run repository demos/examples/training. Validate with quick import/version/device checks only; real demos belong in the experiment stage after audit passes.
-For experiment-stage revisions, stay anchored to the experiment goal. If a command fails, repair missing dependencies, arguments, paths, data locations, or hardware settings and retry the closest goal-directed command. If the exact goal appears too expensive or impossible within the timeout, set feasibility='blocked' or feasibility='unsafe_or_too_expensive' and explain the smallest goal-relevant diagnostic or required human decision in assumptions/stop_reason.
+For experiment-stage revisions, stay anchored to the experiment goal. If previous validation flagged issues (listed above), fix each one explicitly in the new plan. If the exact goal appears too expensive or impossible within the timeout, set feasibility='blocked' or feasibility='unsafe_or_too_expensive' and explain the smallest goal-relevant diagnostic or required human decision in assumptions/stop_reason.
 If using `python -c`, do not define a `def` function on a semicolon-separated one-liner; use a lambda or a short import/device check instead.
 Do not use cd, tee, shell log redirection, or conda activate; commands already run inside the repository root and prepared conda environment, and the runner captures logs.
 """
     return _complete_plan(state, prompt, stage=stage)
 
 
-def review_experiment_plan_semantics(state: ReproState, plan: CommandPlan) -> list[str]:
-    """Ask the LLM whether the final experiment plan really attempts the goal."""
-    if state.task.mock_llm:
-        return []
-    prompt = _base_context(state) + _recent_logs(state) + f"""
+def review_experiment_plan(state: ReproState, plan: CommandPlan) -> dict:
+    """Ask the LLM to review the experiment plan against the goal and return structured feedback.
 
-Review this proposed final experiment plan for semantic alignment. Return strict JSON only:
-{{"issues": ["..."]}}
+    Returns a dict with keys: ready (bool), issues (list[str]), feasibility (str).
+    This single call replaces both the old hard-rule validation and semantic review.
+    """
+    if state.task.mock_llm:
+        return {"ready": True, "issues": [], "feasibility": "ready_to_run"}
+
+    recent = _recent_logs(state)
+    prompt = _base_context(state) + recent + f"""
+
+You are reviewing a proposed experiment plan. Your job is to catch problems BEFORE
+execution, so the plan can be fixed. Return strict JSON only:
+
+{{"ready": true or false, "issues": ["issue 1", "issue 2"], "feasibility": "ready_to_run" or "needs_config" or "needs_patch"}}
 
 Experiment goal:
 {state.task.experiment_goal}
@@ -108,29 +133,78 @@ Plan commands:
 Plan assumptions:
 {chr(10).join(f"- {item}" for item in plan.assumptions) or "- none"}
 
-Existing hard-validation or user-input issues:
-{chr(10).join(f"- {item}" for item in plan.needs_user_input) or "- none"}
+Check EVERY item below. For each check that fails, add a specific, actionable issue
+to the issues list. Quote the exact command or assumption that is wrong.
 
-Current feasibility:
-{plan.feasibility or "unknown"}
+## Goal Alignment
 
-Rules:
-- The final experiment stage must directly attempt the user experiment goal.
-- CodingAgent verification commands are only patch verification evidence; they do not count as the final ReproAgent experiment stage.
-- Dependency installs, import/version checks, --help, grep/sed/find/cat, and smoke checks are not sufficient final experiment commands.
-- If the goal asks for a metric such as training loss, the final run must clearly print/log that metric. If the repo computes the metric internally but does not report it, return an issue saying this requires a repo-local patch.
-- For each requirement keyword in the experiment goal, verify the plan satisfies it in substance, not just form:
-  * "bounded" / "short" / "few epoch" → the plan must explicitly REDUCE epochs/steps below the script default. Using the default --nepochs value (e.g. 160) is NOT bounded. A bounded run should set --nepochs to 10 or fewer unless the script default is already that low.
-  * "GPU" → the command must include a GPU flag or there must be probe evidence that the script defaults to CUDA.
-  * "report <metric>" / "report training loss" → the script output must actually print/log that metric (check probe evidence). Do not assume it does.
-  * "runtime" → the plan must capture elapsed time (time wrapper, timer in script output, etc).
-- If the goal mentions a specific entry point, dataset, or config, verify the commands explicitly reference it.
-- If the command uses CLI flags, compare them to discovered help/log evidence; nonexistent flags or flags missing required values are issues.
-- If the plan is acceptable, return {{"issues": []}}.
+1. Does the plan directly attempt the experiment goal? If it only does inspection
+   (grep/cat/head/--help), that is NOT sufficient — report it.
+2. "bounded" / "short" / "few epoch" → the plan must explicitly set a SMALL
+   epoch/step count (--nepochs 10 or fewer). Using the script's default value
+   (e.g. --nepochs 160) is NOT bounded. Report the issue.
+3. "GPU" → the command must have a GPU flag, or probe evidence must show the
+   script defaults to CUDA on its own.
+4. "report <metric>" / "report training loss" → check the probe evidence: does
+   the script actually print/log that metric? Do NOT assume it does. If probe
+   evidence doesn't confirm it, report it.
+5. "runtime" → the plan must capture elapsed time somehow (time command wrapper,
+   timer printed in script output, etc).
+6. If the goal mentions a specific entry point (a .py file), verify that file
+   appears in the commands.
+
+## Command Format
+
+7. Experiment commands must NOT include --help or -h (that belongs in probe stage).
+8. Commands must NOT use cd, tee, | tee, 2>&1, > or >> for log redirection
+   (the runner already captures stdout/stderr).
+9. Commands must NOT use conda activate or conda run (the runner wraps commands).
+10. Every command must be safe: no sudo, no rm -rf, no shutdown/reboot, no curl|bash,
+    no parent-directory traversal.
+
+## CLI Flag Correctness
+
+11. Compare every --flag in the commands against the probe --help output. If a flag
+    does not appear in the help text, report it and suggest the correct alternative.
+12. If a flag needs a value but is missing one, report it.
+
+## Feasibility
+
+- Use "ready_to_run" when all checks pass.
+- Use "needs_config" for format errors, wrong flags, missing budget, missing GPU
+  evidence — things the LLM can fix by revising the plan.
+- Use "needs_patch" ONLY when the project code genuinely needs modification
+  (e.g. the script does not print a required metric and no CLI option can add it).
+- The system will retry on both "needs_config" and "needs_patch", so do not be
+  afraid to report issues. Be strict — a false pass is worse than a false flag.
+
+If ready is true, issues must be empty and feasibility must be "ready_to_run".
 """
-    text = _call_llm_text(state, prompt, trace_label="experiment_semantic_review")
+    text = _call_llm_text(state, prompt, trace_label="experiment_plan_review")
     data = _loads_plan_json(text)
-    return normalize_text_list(_as_list(data.get("issues", []), drop_false=True))
+    issues = normalize_text_list(_as_list(data.get("issues", []), drop_false=True))
+    feasibility = data.get("feasibility", "needs_config")
+    if feasibility not in FEASIBILITIES:
+        feasibility = "needs_config"
+    ready = bool(data.get("ready", False))
+    if ready and issues:
+        ready = False
+        if feasibility == "ready_to_run":
+            feasibility = "needs_config"
+    return {"ready": ready, "issues": issues, "feasibility": feasibility}
+
+
+def apply_review_to_plan(plan: CommandPlan, review: dict) -> CommandPlan:
+    """Apply a review result to a command plan, updating feasibility and issues."""
+    if review.get("ready"):
+        return plan.model_copy(update={"feasibility": "ready_to_run", "needs_user_input": []})
+    messages = review.get("issues", [])
+    existing = [item for item in (plan.needs_user_input or []) if item not in messages]
+    feasibility = review.get("feasibility") or "needs_config"
+    return plan.model_copy(update={
+        "feasibility": feasibility,
+        "needs_user_input": existing + messages,
+    })
 
 
 def final_review(state: ReproState) -> str:

@@ -54,7 +54,7 @@ def test_plan_only_runs_probe_and_does_not_run_experiment(tmp_path, monkeypatch)
     assert (task.workspace_dir / "result.md").exists()
 
 
-def test_experiment_validation_failure_stops_before_running_commands(tmp_path, monkeypatch):
+def test_experiment_plan_review_rejection_stops_before_running_commands(tmp_path, monkeypatch):
     from reproagent import main
     from reproagent.models import CommandPlan, EnvironmentAudit, EnvironmentInfo, RepoContext, ReproTask
 
@@ -76,10 +76,15 @@ def test_experiment_validation_failure_stops_before_running_commands(tmp_path, m
             feasibility="ready_to_run",
         ),
     )
+    monkeypatch.setattr(
+        main,
+        "review_experiment_plan",
+        lambda state, plan: {"ready": False, "issues": ["Missing training loss logging."], "feasibility": "needs_patch"},
+    )
 
     def fake_run_commands(commands, cwd, workspace, stage, attempt, timeout, env_name):
         if stage == "experiment":
-            raise AssertionError("validation failure must stop before experiment execution")
+            raise AssertionError("plan review rejection must stop before experiment execution")
         return []
 
     monkeypatch.setattr(main, "run_commands", fake_run_commands)
@@ -109,7 +114,11 @@ def test_revised_experiment_plan_is_validated_before_execution(tmp_path, monkeyp
     monkeypatch.setattr(main, "audit_environment", lambda state: EnvironmentAudit(success=True, summary="ok"))
     monkeypatch.setattr(main, "plan_environment", lambda state: CommandPlan(stage="environment", summary="env", commands=[]))
     monkeypatch.setattr(main, "plan_probe", lambda state: CommandPlan(stage="probe", summary="probe", commands=[]))
-    monkeypatch.setattr(main, "review_experiment_plan_semantics", lambda state, plan: [])
+    review_responses = iter([
+        {"ready": False, "issues": ["Missing bounded budget."], "feasibility": "needs_config"},
+        {"ready": False, "issues": ["Plan only contains dependency/setup or inspection commands."], "feasibility": "needs_config"},
+    ])
+    monkeypatch.setattr(main, "review_experiment_plan", lambda state, plan: next(review_responses))
     monkeypatch.setattr(
         main,
         "plan_experiment",
@@ -168,7 +177,11 @@ def test_llm_semantic_review_can_reject_ready_experiment_plan(tmp_path, monkeypa
     monkeypatch.setattr(main, "audit_environment", lambda state: EnvironmentAudit(success=True, summary="ok"))
     monkeypatch.setattr(main, "plan_environment", lambda state: CommandPlan(stage="environment", summary="env", commands=[]))
     monkeypatch.setattr(main, "plan_probe", lambda state: CommandPlan(stage="probe", summary="probe", commands=[]))
-    monkeypatch.setattr(main, "review_experiment_plan_semantics", lambda state, plan: ["LLM reviewer says this does not measure the requested metric."])
+    monkeypatch.setattr(
+        main,
+        "review_experiment_plan",
+        lambda state, plan: {"ready": False, "issues": ["LLM reviewer says this does not measure the requested metric."], "feasibility": "needs_config"},
+    )
     monkeypatch.setattr(
         main,
         "plan_experiment",
