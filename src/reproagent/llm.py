@@ -153,14 +153,14 @@ def _mirror_block(task: ReproTask) -> str:
 
 # ── LLM call ──────────────────────────────────────────────────────
 
-def call_llm(task: ReproTask, messages: list[dict]) -> str:
+def call_llm(task: ReproTask, messages: list[dict], *, trace_label: str = "") -> str:
     """Call the LLM and return the response text."""
     if task.mock_llm:
         return _mock_response(messages)
-    return _openai_compatible(task, messages)
+    return _openai_compatible(task, messages, trace_label=trace_label)
 
 
-def _openai_compatible(task: ReproTask, messages: list[dict]) -> str:
+def _openai_compatible(task: ReproTask, messages: list[dict], *, trace_label: str = "") -> str:
     api_key = os.environ.get(task.api_key_env)
     if not api_key:
         raise RuntimeError(f"{task.api_key_env} is not set. Use --mock-llm for local testing.")
@@ -175,7 +175,24 @@ def _openai_compatible(task: ReproTask, messages: list[dict]) -> str:
     )
     with urllib.request.urlopen(req, timeout=120) as resp:
         data = json.loads(resp.read().decode("utf-8"))
-    return data["choices"][0]["message"]["content"].strip()
+    text = data["choices"][0]["message"]["content"].strip()
+    if trace_label:
+        _write_llm_trace(task, trace_label, messages, text)
+    return text
+
+
+def _write_llm_trace(task: ReproTask, trace_label: str, messages: list[dict], response: str) -> None:
+    """Save LLM prompt and response to the workspace logs directory."""
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", trace_label).strip("_") or "llm"
+    logs_dir = task.workspace_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+    prefix = logs_dir / f"llm_{stamp}_{safe}"
+    prompt_text = "\n\n".join(
+        f"[{m['role']}]\n{m['content']}" for m in messages
+    )
+    (prefix.with_suffix(".prompt.txt")).write_text(prompt_text, encoding="utf-8")
+    (prefix.with_suffix(".response.txt")).write_text(response, encoding="utf-8")
 
 
 def _chat_completions_url(api_base: str) -> str:

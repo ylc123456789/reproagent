@@ -39,6 +39,7 @@ class ReproTask(BaseModel):
     config_path: Path | None = None
     mirror_profile: MirrorProfile = "none"
     mirror_strict: bool = False
+    confirm_before_experiment: bool = False
 
 
 class RepoContext(BaseModel):

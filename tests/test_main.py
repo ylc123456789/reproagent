@@ -22,15 +22,6 @@ def test_run_parser_reads_confirm_before_experiment(tmp_path):
     assert args.confirm_before_experiment
 
 
-def test_run_parser_reads_plan_only(tmp_path):
-    parser = build_parser()
-    args = parser.parse_args([
-        "run", "--paper", "paper", "--repo", "repo", "--workspace", str(tmp_path),
-        "--experiment-goal", "Generate plan.", "--plan-only",
-    ])
-    assert args.plan_only
-
-
 def test_run_parser_reads_repo_cache_dir(tmp_path):
     parser = build_parser()
     cache_dir = tmp_path / "repo-cache"

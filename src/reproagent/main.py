@@ -26,8 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--timeout", type=int, default=1800, help="Timeout per command batch (seconds)")
     run.add_argument("--max-steps", type=int, default=30, help="Max agent steps before force-finish")
     run.add_argument("--experiment-goal", required=True, help="Concrete reproduction goal")
-    run.add_argument("--confirm-before-experiment", action="store_true", help=argparse.SUPPRESS)
-    run.add_argument("--plan-only", action="store_true", help=argparse.SUPPRESS)
+    run.add_argument("--confirm-before-experiment", action="store_true",
+                     help="Ask for confirmation before running experiment commands")
     run.add_argument("--enable-coding-agent", action="store_true", help="Allow CodingAgent to modify repo code")
     run.add_argument("--max-coding-agent-steps", type=int, default=24, help="Max CodingAgent steps per patch")
     run.add_argument("--codingagent-path", type=Path, default=None, help="Path to CodingAgent checkout")
@@ -63,6 +63,7 @@ def main(argv: list[str] | None = None) -> None:
             config_path=args.config,
             mirror_profile=args.mirror_profile,
             mirror_strict=args.mirror_strict,
+            confirm_before_experiment=args.confirm_before_experiment,
         )
         state = run_controller(task)
         print(f"status: {state.status}")

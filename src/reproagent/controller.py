@@ -41,6 +41,18 @@ def _log(message: str) -> None:
     print(f"[reproagent] {message}", flush=True)
 
 
+def _confirm_experiment(commands: list[str]) -> bool:
+    """Ask the user to confirm experiment commands."""
+    _log("experiment commands:")
+    for i, cmd in enumerate(commands, 1):
+        print(f"  {i}. {cmd}", flush=True)
+    try:
+        answer = input("[reproagent] Run these experiment commands? [y/N] ").strip().lower()
+    except EOFError:
+        return False
+    return answer in {"y", "yes"}
+
+
 def _current_reproagent_version() -> ReproAgentVersion:
     source_path = Path(__file__).resolve().parents[2]
     return ReproAgentVersion(
@@ -171,6 +183,14 @@ def _tool_run_commands(action: AgentAction, state: AgentState) -> AgentObservati
             action=action.action,
             stage_hint=action.stage_hint,
             error="no commands provided",
+        )
+    if (state.task.confirm_before_experiment and action.stage_hint == "experiment"
+            and not _confirm_experiment(commands)):
+        return AgentObservation(
+            step=len(state.steps) + 1,
+            action=action.action,
+            stage_hint=action.stage_hint,
+            error="experiment cancelled by user before command execution",
         )
     if state.task.mock_llm:
         # In mock mode, skip conda wrapping — run commands directly
@@ -327,7 +347,7 @@ def run_controller(task: ReproTask) -> AgentState:
             })
 
         # call LLM
-        raw = call_llm(task, history)
+        raw = call_llm(task, history, trace_label=f"step_{len(state.steps) + 1:02d}")
         history.append({"role": "assistant", "content": raw})
 
         action = _parse_action(raw)
