@@ -136,6 +136,9 @@ Plan assumptions:
 Check EVERY item below. For each check that fails, add a specific, actionable issue
 to the issues list. Quote the exact command or assumption that is wrong.
 
+At the end, classify every requirement you found in the goal as [MET], [NOT MET],
+or [UNCERTAIN]. Include this classification at the top of the issues list.
+
 ## Goal Alignment
 
 1. Does the plan directly attempt the experiment goal? If it only does inspection
@@ -145,9 +148,11 @@ to the issues list. Quote the exact command or assumption that is wrong.
    (e.g. --nepochs 160) is NOT bounded. Report the issue.
 3. "GPU" → the command must have a GPU flag, or probe evidence must show the
    script defaults to CUDA on its own.
-4. "report <metric>" / "report training loss" → check the probe evidence: does
-   the script actually print/log that metric? Do NOT assume it does. If probe
-   evidence doesn't confirm it, report it.
+4. If the goal requires a specific metric (e.g. "report training loss", "report
+   accuracy"), check the probe evidence: does the script actually print/log that
+   metric? Do NOT assume it does. If probe evidence confirms the script does NOT
+   output this metric, you MUST set feasibility to "needs_patch" — no CLI flag
+   or plan revision can make the script print something it does not print.
 5. "runtime" → the plan must capture elapsed time somehow (time command wrapper,
    timer printed in script output, etc).
 6. If the goal mentions a specific entry point (a .py file), verify that file
@@ -170,11 +175,13 @@ to the issues list. Quote the exact command or assumption that is wrong.
 
 ## Feasibility
 
-- Use "ready_to_run" when all checks pass.
-- Use "needs_config" for format errors, wrong flags, missing budget, missing GPU
-  evidence — things the LLM can fix by revising the plan.
-- Use "needs_patch" ONLY when the project code genuinely needs modification
-  (e.g. the script does not print a required metric and no CLI option can add it).
+- Use "ready_to_run" when all checks pass and every goal requirement is [MET].
+- Use "needs_config" when issues can be fixed by revising the plan (format errors,
+  wrong flags, missing budget, missing GPU evidence, wrong epoch count, etc.).
+- Use "needs_patch" when the project code must be modified to satisfy the goal
+  (e.g. a required metric is not printed by the script and no CLI flag can add it).
+  If probe evidence confirms a required metric is missing from the script output,
+  needs_patch is the ONLY correct choice — do not downgrade to needs_config.
 - The system will retry on both "needs_config" and "needs_patch", so do not be
   afraid to report issues. Be strict — a false pass is worse than a false flag.
 
@@ -213,7 +220,43 @@ def final_review(state: ReproState) -> str:
         return _mock_final_review(state)
     prompt = _base_context(state) + _recent_logs(state) + """
 
-Write a concise reproduction result summary. Explain the experiment goal, what worked, what failed, whether the goal was achieved or only partially achieved, what metrics were found, whether the run used GPU or CPU fallback, and what human input is needed next. If CodingAgent changed files, explicitly describe the run as using a repo-local patch and do not claim the original code ran without modification. Return plain Markdown.
+Write a reproduction result report in Markdown with the sections below.
+Return plain Markdown only — no JSON wrapper.
+
+## Required sections
+
+### Summary
+One paragraph: what was the goal, what ran, did it succeed or partially succeed,
+did the run use GPU or CPU, were any code patches applied.
+
+### Metrics
+A table or list covering EVERY requirement in the experiment goal. For each one,
+state the actual value obtained (or "not available"), which log file the value
+came from, and a [MET] / [NOT MET] / [UNCERTAIN] label. If a metric was computed
+by the script but not printed to any output, mark it [NOT MET] and explain why.
+Quote the exact log line or file path as evidence. Example format:
+
+| Requirement | Status | Value | Evidence |
+|-------------|--------|-------|----------|
+| test accuracy | [MET] | 99.05% | logs/experiment_02_02.stderr L10 |
+| training loss | [NOT MET] | — | Script computes loss for backprop but does not log it |
+
+### Deviations
+List every way the experiment differed from the paper or goal requirements
+(epoch count, flags, hardware, solver settings, etc.). Be explicit.
+
+### Data Index
+A bullet list of EVERY log file produced by this run with its path relative to
+the workspace and a one-line description of what it contains. Group by stage
+(environment, probe, experiment, patches). Example:
+
+- logs/experiment_02_02.stderr — per-epoch training output with accuracy and timing
+- logs/experiment_02_02.stdout — experiment stdout (empty; script writes to stderr)
+- patches/coding_agent_01/diff.patch — code changes applied (if any)
+
+### Next Steps
+What a human should do next: rerun with different flags, apply a patch for a
+missing metric, run the full training schedule, etc.
 """
     return normalize_text(_call_llm_text(state, prompt, trace_label="final_review"))
 
