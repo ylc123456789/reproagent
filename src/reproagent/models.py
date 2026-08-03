@@ -10,21 +10,22 @@ Feasibility = Literal["ready_to_run", "needs_config", "needs_patch", "blocked", 
 MirrorProfile = Literal["none", "cn", "autodl"]
 from pydantic import BaseModel, Field
 
+
 def _task_id() -> str:
     """Create a short unique task identifier."""
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return f"repro-{stamp}-{uuid.uuid4().hex[:6]}"
 
+
 class ReproTask(BaseModel):
-    """Represent ReproTask data."""
+    """Reproduction task configuration."""
     paper_url: str
     repo_url: str
     workspace_dir: Path
     repo_cache_dir: Path | None = None
     task_id: str = Field(default_factory=_task_id)
-    max_env_attempts: int = 3
-    max_run_attempts: int = 3
     timeout_seconds: int = 1800
+    max_steps: int = 30
     mock_llm: bool = False
     model: str | None = None
     api_base: str = "https://api.openai.com/v1"
@@ -32,8 +33,6 @@ class ReproTask(BaseModel):
     backend: Literal["conda"] = "conda"
     python_version: str = "3.10"
     experiment_goal: str = ""
-    confirm_before_experiment: bool = False
-    plan_only: bool = False
     enable_coding_agent: bool = False
     max_coding_agent_steps: int = 24
     codingagent_path: Path | None = None
@@ -41,8 +40,9 @@ class ReproTask(BaseModel):
     mirror_profile: MirrorProfile = "none"
     mirror_strict: bool = False
 
+
 class RepoContext(BaseModel):
-    """Represent RepoContext data."""
+    """Cloned repository context."""
     repo_path: Path
     commit_hash: str | None = None
     file_tree: str = ""
@@ -51,16 +51,18 @@ class RepoContext(BaseModel):
     paper_url: str = ""
     summary_path: Path | None = None
 
+
 class ReproAgentVersion(BaseModel):
-    """Record the reproagent code version used for a run."""
+    """Reproagent code version used for a run."""
     source_path: Path
     git_commit: str | None = None
     git_branch: str | None = None
     git_dirty: bool | None = None
     git_remote: str | None = None
 
+
 class EnvironmentInfo(BaseModel):
-    """Represent EnvironmentInfo data."""
+    """Conda environment metadata."""
     backend: Literal["conda"] = "conda"
     env_name: str
     created: bool = False
@@ -69,8 +71,9 @@ class EnvironmentInfo(BaseModel):
     setup_stdout_path: Path | None = None
     setup_stderr_path: Path | None = None
 
+
 class EnvironmentAudit(BaseModel):
-    """Represent EnvironmentAudit data."""
+    """Result of environment audit."""
     success: bool
     summary: str
     details: list[str] = Field(default_factory=list)
@@ -79,43 +82,23 @@ class EnvironmentAudit(BaseModel):
     stdout_path: Path | None = None
     stderr_path: Path | None = None
 
-class CommandPlan(BaseModel):
-    """Represent CommandPlan data."""
-    stage: StageName
-    summary: str
-    commands: list[str] = Field(default_factory=list)
-    assumptions: list[str] = Field(default_factory=list)
-    feasibility: Feasibility | None = None
-    expected_runtime: str | None = None
-    needs_user_input: list[str] = Field(default_factory=list)
-    stop_reason: str | None = None
 
 class CommandResult(BaseModel):
-    """Represent CommandResult data."""
+    """Result of a single shell command."""
     command: str
     exit_code: int
     stdout_path: Path
     stderr_path: Path
     duration_seconds: float
     backend_command: list[str] = Field(default_factory=list)
+
     @property
     def success(self) -> bool:
-        """Return whether the result succeeded."""
         return self.exit_code == 0
 
-class StageResult(BaseModel):
-    """Represent StageResult data."""
-    stage: StageName
-    attempt: int
-    plan: CommandPlan
-    results: list[CommandResult] = Field(default_factory=list)
-    @property
-    def success(self) -> bool:
-        """Return whether the result succeeded."""
-        return bool(self.results) and all(r.success for r in self.results)
 
 class CodingAgentResult(BaseModel):
-    """Represent CodingAgentResult data."""
+    """Result of a CodingAgent patch attempt."""
     status: str
     summary: str = ""
     changed_files: list[str] = Field(default_factory=list)
@@ -127,8 +110,85 @@ class CodingAgentResult(BaseModel):
     residual_risks: list[str] = Field(default_factory=list)
 
 
+# ── Agent-loop types ──────────────────────────────────────────────
+
+class AgentAction(BaseModel):
+    """An action decided by the LLM."""
+    thinking: str
+    action: Literal["run_commands", "audit_env", "call_coding_agent", "finish"]
+    stage_hint: str = ""
+    commands: list[str] = Field(default_factory=list)
+    coding_goal: str = ""
+    coding_issues: list[str] = Field(default_factory=list)
+    finish_status: str = ""
+    finish_summary: str = ""
+
+
+class AgentObservation(BaseModel):
+    """Result of executing one agent action."""
+    step: int
+    action: str
+    stage_hint: str
+    command_results: list[CommandResult] = Field(default_factory=list)
+    audit: EnvironmentAudit | None = None
+    coding_result: CodingAgentResult | None = None
+    error: str = ""
+
+
+class AgentState(BaseModel):
+    """Full agent state, persisted to state.json."""
+    task: ReproTask
+    repo_context: RepoContext | None = None
+    environment: EnvironmentInfo | None = None
+    last_audit: EnvironmentAudit | None = None
+    coding_results: list[CodingAgentResult] = Field(default_factory=list)
+    steps: list[AgentObservation] = Field(default_factory=list)
+    status: str = "running"
+    final_summary: str = ""
+    result_path: Path | None = None
+
+    # compatibility aliases for infrastructure modules
+    @property
+    def environment_audit(self):
+        return self.last_audit
+
+    @property
+    def coding_agent_results(self):
+        return self.coding_results
+
+    @property
+    def probe_attempts(self) -> list:
+        return []  # coding._verification_commands uses this; empty is fine
+
+
+# ── Legacy types (used by runner / coding / report) ───────────────
+
+class CommandPlan(BaseModel):
+    """Legacy command plan, kept for runner and CodingAgent compatibility."""
+    stage: StageName
+    summary: str
+    commands: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    feasibility: Feasibility | None = None
+    expected_runtime: str | None = None
+    needs_user_input: list[str] = Field(default_factory=list)
+    stop_reason: str | None = None
+
+
+class StageResult(BaseModel):
+    """Legacy stage result, kept for report compatibility."""
+    stage: StageName
+    attempt: int
+    plan: CommandPlan
+    results: list[CommandResult] = Field(default_factory=list)
+
+    @property
+    def success(self) -> bool:
+        return bool(self.results) and all(r.success for r in self.results)
+
+
 class ReproState(BaseModel):
-    """Represent ReproState data."""
+    """Legacy state model, kept for infrastructure module compatibility."""
     task: ReproTask
     status: str = "created"
     reproagent_version: ReproAgentVersion | None = None
