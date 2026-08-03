@@ -130,6 +130,7 @@ class ControllerAction(BaseModel):
         "insert_before",
         "insert_after",
         "apply_patch",
+        "write_file",
         "run_command",
         "finish",
         "ask_user",
@@ -141,6 +142,7 @@ class ControllerAction(BaseModel):
     query: str | None = None
     command: str | None = None
     patch: str | None = None
+    content: str | None = None
     old_text: str | None = None
     new_text: str | None = None
     anchor_text: str | None = None
