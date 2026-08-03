@@ -27,9 +27,10 @@ def plan_environment(state: ReproState) -> CommandPlan:
     """Ask the LLM for dependency setup commands."""
     prompt = _base_context(state) + """
 
-Plan dependency setup commands needed inside the already-created conda environment for the experiment goal and final reproduction target.
+Plan dependency setup commands needed inside the conda environment for the experiment goal and final reproduction target.
 Return JSON with fields: stage, summary, commands, assumptions, stop_reason.
-Use stage='environment'. Prefer project-provided files such as requirements.txt, pyproject.toml, setup.py, or environment.yml when appropriate, but do not blindly accept an unconstrained latest GPU framework package if it conflicts with the detected hardware.
+Use stage='environment'. The conda environment status is shown above — if freshly created, it contains only Python; you must install every dependency from scratch. Always run pip install / package setup commands BEFORE any import or version checks. A failed import check does not mean the environment setup failed; it means you tried to import before installing.
+Prefer project-provided files such as requirements.txt, pyproject.toml, setup.py, or environment.yml when appropriate, but do not blindly accept an unconstrained latest GPU framework package if it conflicts with the detected hardware.
 If an NVIDIA GPU is visible and the project uses PyTorch/JAX/TensorFlow, configure a GPU-capable build compatible with the reported driver/CUDA capability. For PyTorch, inspect the repo pins first; if the repo only says something broad like torch>=x, choose a build compatible with this machine instead of defaulting to the newest CUDA build. Follow the mirror policy from the run context when choosing package indexes or find-links.
 For older PyTorch builds, avoid incompatible NumPy 2.x ABI issues; pin numpy<2 when the selected torch build or logs indicate NumPy 1.x compatibility.
 Quote shell-sensitive pip version specifiers such as `numpy<2`, `torch>=2`, or `package[extra]` in commands, for example `pip install "numpy<2" scipy`.
@@ -96,7 +97,7 @@ The previous {stage} attempt failed or the environment audit required repair. Di
 Return JSON with fields: stage, summary, commands, assumptions, stop_reason.
 If the audit says GPU repair is required, fix the installed ML framework build so GPU is available on this hardware, unless the repo clearly does not use that framework. Prefer explicit uninstall/reinstall commands for incompatible packages when needed.
 If the audit says NumPy ABI repair is required, pin or downgrade NumPy, commonly `pip install "numpy<2"`, then rerun a quick import/device check.
-For environment-stage revisions, do not run repository demos/examples/training. Validate with quick import/version/device checks only; real demos belong in the experiment stage after audit passes.
+For environment-stage revisions: first check whether the environment is already correctly set up by looking at the audit results and command logs. If imports, GPU, and all required packages are working, return an empty command plan — the environment stage is done. If something is broken, fix only that specific issue with targeted pip install/uninstall commands. Never run repository demos, examples, training scripts, or evaluation commands in the environment stage — even as a "quick test". Real experiments belong in the experiment stage after audit passes.
 For experiment-stage revisions, stay anchored to the experiment goal. If previous validation flagged issues (listed above), fix each one explicitly in the new plan. If the exact goal appears too expensive or impossible within the timeout, set feasibility='blocked' or feasibility='unsafe_or_too_expensive' and explain the smallest goal-relevant diagnostic or required human decision in assumptions/stop_reason.
 If using `python -c`, do not define a `def` function on a semicolon-separated one-liner; use a lambda or a short import/device check instead.
 Do not use cd, tee, shell log redirection, or conda activate; commands already run inside the repository root and prepared conda environment, and the runner captures logs.
@@ -379,7 +380,14 @@ def _base_context(state: ReproState) -> str:
     if ctx is None:
         return "No repo context available."
     env = state.environment
-    env_text = f"Conda env: {env.env_name}" if env else "Conda env: not prepared yet"
+    if env:
+        env_text = f"Conda env: {env.env_name}"
+        if env.created:
+            env_text += " (freshly created — contains only Python, no packages installed yet)"
+        else:
+            env_text += " (reused from a previous run — may already have packages installed)"
+    else:
+        env_text = "Conda env: not prepared yet"
     return f"""
 Paper URL: {state.task.paper_url}
 Repo URL: {state.task.repo_url}
