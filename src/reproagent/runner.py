@@ -193,6 +193,13 @@ def _command_env(workspace: Path) -> dict[str, str]:
     omp = env.get("OMP_NUM_THREADS", "").strip()
     if not omp.isdigit() or int(omp) <= 0:
         env["OMP_NUM_THREADS"] = "16"
+    try:
+        local_ds = "/root/autodl-tmp/datasets"
+        if Path(local_ds).is_dir():
+            for key in ("TORCH_HOME", "HF_HOME", "TORCHVISION_DATASETS", "HUGGINGFACE_HUB_CACHE"):
+                env.setdefault(key, local_ds)
+    except (OSError, PermissionError):
+        pass
     return env
 
 
