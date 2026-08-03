@@ -140,6 +140,15 @@ to the issues list. Quote the exact command or assumption that is wrong.
 At the end, classify every requirement you found in the goal as [MET], [NOT MET],
 or [UNCERTAIN]. Include this classification at the top of the issues list.
 
+Important: base your classification on the probe evidence you already have. Do NOT
+suggest additional grep/cat/head commands to gather more evidence — probing is the
+probe stage's job, not yours. [UNCERTAIN] should be rare: use it only when probe
+evidence is genuinely incomplete or contradictory. When probe evidence clearly
+shows a required metric is not printed by the script, mark it [NOT MET] and set
+feasibility to needs_patch. When evidence clearly shows the metric IS printed,
+mark it [MET] and move on. Your job is to make definitive calls from available
+evidence, not to request more investigation.
+
 ## Goal Alignment
 
 1. Does the plan directly attempt the experiment goal? If it only does inspection
