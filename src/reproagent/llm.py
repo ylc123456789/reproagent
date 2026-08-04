@@ -1,9 +1,8 @@
 """LLM interface for the agent-loop controller.
 
-A single system prompt drives the agent.  All previous stage-specific prompts
-(plan_environment, plan_probe, plan_experiment, revise_after_failure,
-review_experiment_plan, final_review) are removed — the controller prompt
-covers everything.
+Context is rebuilt from structured state each turn — never appended as raw
+chat history.  This keeps the prompt focused on current decision-making
+instead of accumulating stale output from early steps.
 """
 
 from __future__ import annotations
@@ -14,7 +13,14 @@ import re
 import urllib.request
 from datetime import datetime
 
-from .models import EnvironmentInfo, RepoContext, ReproTask
+from .models import (
+    AgentObservation,
+    AgentState,
+    ContextPolicy,
+    EnvironmentInfo,
+    RepoContext,
+    ReproTask,
+)
 
 SYSTEM_PROMPT = """\
 You are a machine-learning reproducibility engineer. Your task: reproduce a paper experiment inside a prepared conda environment.
@@ -61,10 +67,10 @@ Format:
 - Follow the mirror policy exactly — use domestic mirrors for all pip installs when configured.
 - When an NVIDIA GPU is visible, prioritize GPU-capable PyTorch/TensorFlow/JAX builds
   compatible with the reported driver/CUDA version.
-- Follow the mirror policy from the context when choosing package indexes.
 - If a command fails, read the error and fix it. If a dependency is missing, install it.
 - If pip install fails with a specific version, try without the version pin or from a different index.
-- After installing major dependencies (torch, tensorflow, etc.), re-run audit_env so you and any future call_coding_agent have accurate environment information.
+- After installing major dependencies (torch, tensorflow, etc.), re-run audit_env so you
+  and any future call_coding_agent have accurate environment information.
 
 ### Experiment
 - Probe the script interface (--help, head, grep) before running training.
@@ -92,25 +98,16 @@ Format:
 
 # ── context builder ──────────────────────────────────────────────
 
-def build_context_block(task: ReproTask, repo_context: RepoContext, environment: EnvironmentInfo) -> str:
-    """Build the initial user message with all context the agent needs."""
-    env_text = f"Conda env: {environment.env_name}"
-    if environment.created:
-        env_text += " (freshly created — contains only Python, no packages installed yet)"
-    else:
-        env_text += " (reused — may already have packages)"
-
-    cache_line = ""
-    if task.dataset_cache_dir:
-        cache_line = f"\nDataset cache: {task.dataset_cache_dir} (torchvision, HuggingFace, and torch.hub will auto-cache there)"
-
+def build_initial_context(task: ReproTask, repo_context: RepoContext, environment: EnvironmentInfo) -> str:
+    """Build the very first user message — only called once at the start."""
+    env_text = _env_line(environment)
     return f"""## Task
 
 Paper: {task.paper_url}
 Repo: {task.repo_url} (cloned at {repo_context.repo_path}, commit {repo_context.commit_hash or 'unknown'})
 Experiment goal: {task.experiment_goal}
 Timeout: {task.timeout_seconds}s per command batch
-Max steps: {task.max_steps}{cache_line}
+Max steps: {task.max_steps}{_cache_line(task)}
 
 ## Environment
 
@@ -134,47 +131,174 @@ Max steps: {task.max_steps}{cache_line}
 Begin. Think step by step, one action at a time. What is your first action?"""
 
 
+def build_turn_prompt(state: AgentState, policy: ContextPolicy) -> str:
+    """Build a fresh prompt for the NEXT agent turn from structured state.
+
+    This replaces the old append-only history.  Each turn the prompt is
+    rebuilt from scratch using the current state — old step output is
+    compacted, file reads are cached, and the most recent step is shown
+    in full.
+    """
+    parts: list[str] = []
+
+    # --- task ---
+    parts.append("## Task")
+    parts.append(f"Goal: {state.task.experiment_goal}")
+    remaining = state.task.max_steps - len(state.steps)
+    parts.append(f"Timeout: {state.task.timeout_seconds}s | Steps used: {len(state.steps)}/{state.task.max_steps} (max)")
+    if state.task.dataset_cache_dir:
+        parts.append(f"Dataset cache: {state.task.dataset_cache_dir}")
+    if remaining <= 4:
+        parts.append(f"Only {remaining} step(s) remain. Prioritize finishing.")
+
+    # --- environment ---
+    if state.environment:
+        parts.append(f"\n## Environment\n{_env_line(state.environment)}")
+    if state.last_audit:
+        parts.append(f"\n## Latest Audit\n{_compact_audit(state.last_audit)}")
+
+    # --- file cache ---
+    if state.file_cache:
+        headers: list[str] = []
+        for path, text in list(state.file_cache.items())[-policy.file_cache_count:]:
+            tail = text[-policy.file_cache_chars:]
+            headers.append(f"{path} ({len(text)} chars):\n```\n{tail}\n```")
+        parts.append(f"\n## Recent File Reads\n\n" + "\n\n".join(headers))
+
+    # --- compacted steps ---
+    history = state.steps
+    if len(history) > 1:
+        compacted = history[:-1][-policy.step_history:]
+        if compacted:
+            items: list[str] = []
+            for step in compacted:
+                items.append(_compact_step_line(step, policy))
+            parts.append(f"\n## Previous Steps\n\n" + "\n".join(items))
+
+    # --- last result (full) ---
+    if history:
+        parts.append(f"\n## Last Result (step {len(history)})\n{_format_step_full(history[-1], policy)}")
+
+    parts.append("\nWhat is your next action? Return JSON.")
+    return "\n".join(parts)
+
+
+# ── helpers ───────────────────────────────────────────────────────
+
+def _env_line(env: EnvironmentInfo) -> str:
+    if env.created:
+        return f"Conda env: {env.env_name} (freshly created — empty, only Python)"
+    return f"Conda env: {env.env_name} (reused — may have packages)"
+
+
+def _cache_line(task: ReproTask) -> str:
+    if task.dataset_cache_dir:
+        return f"\nDataset cache: {task.dataset_cache_dir} (torchvision/HF/torch.hub auto-cache)"
+    return ""
+
+
 def _mirror_block(task: ReproTask) -> str:
     profile = task.mirror_profile
     if profile == "none":
-        return "Mirror policy: none. Use the repository instructions, the current pip/conda configuration, or official package indexes as appropriate."
+        return "Mirror policy: none."
     strict = "strict" if task.mirror_strict else "preferred"
     lines = [
-        f"Mirror policy: {profile} ({strict}). Prefer the configured mirror profile for dependency downloads.",
-        "For ordinary pip packages: use -i https://mirrors.aliyun.com/pypi/simple",
-        "Avoid --index-url https://download.pytorch.org/whl/... — it overrides domestic/server pip mirrors and often downloads slowly from international PyTorch hosts.",
-        "Install the GPU ML framework BEFORE pip install -e . when the repo has broad dependencies like torch>=x, so editable install does not pull an incompatible/latest framework build.",
+        f"Mirror policy: {profile} ({strict}).",
+        "For pip: use -i https://mirrors.aliyun.com/pypi/simple",
+        "Avoid --index-url https://download.pytorch.org/whl/ — overrides domestic mirrors.",
+        "Install GPU framework BEFORE pip install -e .",
     ]
     if profile == "autodl":
-        lines += [
-            "AutoDL: prefer plain pip pins such as `pip install torch==2.6.0 torchvision==0.21.0` and remove PyTorch official -f/--index-url options so installation uses the domestic pip source configured on the instance.",
-            "Only use aliyun PyTorch wheel find-links like -f https://mirrors.aliyun.com/pytorch-wheels/cu124/ when an explicit local-version wheel such as torch==2.6.0+cu124 is required AND available from that mirror.",
-        ]
-    elif profile == "cn":
-        lines.append(
-            "For explicit PyTorch local-version CUDA wheels, prefer a domestic find-links mirror such as "
-            "-f https://mirrors.aliyun.com/pytorch-wheels/cu124/ when the matching CUDA wheel page exists."
-        )
+        lines.append("Prefer plain pip pins (torch==2.6.0 torchvision==0.21.0). Only use -f aliyun pytorch-wheels for +cuXXX wheels.")
     if task.mirror_strict:
-        lines.append("Strict mirror mode: if a required package or GPU wheel is unavailable from the preferred mirror, report it instead of silently falling back to official international indexes.")
+        lines.append("Strict: report missing packages instead of falling back to official indexes.")
     return "\n".join(lines)
+
+
+def _compact_audit(audit) -> str:
+    if not audit.details:
+        return "No audit data."
+    return "\n".join(f"- {d}" for d in audit.details)
+
+
+def _compact_step_line(step: AgentObservation, policy: ContextPolicy) -> str:
+    """Single-line compact summary of a step."""
+    tag = step.stage_hint or step.action
+    if step.error:
+        return f"- Step {step.step} {step.action}({tag}): ERROR — {step.error[:200]}"
+    if step.command_results:
+        codes = ", ".join(f"{'OK' if r.exit_code == 0 else 'FAIL'}" for r in step.command_results)
+        snippets = " | ".join(_command_snippet(r, policy) for r in step.command_results)
+        return f"- Step {step.step} {step.action}({tag}): [{codes}] {snippets}"
+    if step.audit:
+        return f"- Step {step.step} audit_env: {'OK' if step.audit.success else 'FAILED'}"
+    if step.coding_result:
+        return f"- Step {step.step} call_coding_agent: {step.coding_result.status}"
+    return f"- Step {step.step} {step.action}({tag})"
+
+
+def _command_snippet(result, policy: ContextPolicy) -> str:
+    """Brief command summary with tail of output."""
+    cmd_short = result.command[:80]
+    tail = ""
+    for path in (result.stderr_path, result.stdout_path):
+        if path.exists():
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if text.strip():
+                tail = text.strip()[-policy.observation_tail:]
+                break
+    if tail:
+        return f"{cmd_short}: {tail}"
+    return f"{cmd_short} (exit={result.exit_code})"
+
+
+def _format_step_full(step: AgentObservation, policy: ContextPolicy) -> str:
+    """Full output for the most recent step."""
+    if step.error:
+        return f"Action: {step.action}({step.stage_hint})\nError: {step.error}"
+    if step.command_results:
+        lines = [f"Action: {step.action}({step.stage_hint})"]
+        for r in step.command_results:
+            tag = "OK" if r.exit_code == 0 else "FAIL"
+            lines.append(f"$ {r.command}")
+            lines.append(f"exit={r.exit_code} duration={r.duration_seconds}s [{tag}]")
+            for label, path in [("stdout", r.stdout_path), ("stderr", r.stderr_path)]:
+                if path.exists():
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                    if text.strip():
+                        lines.append(f"--- {label} ({len(text)} bytes) ---")
+                        lines.append(text[-policy.observation_tail * 3:])
+        return "\n".join(lines)
+    if step.audit:
+        return f"audit_env: {'PASSED' if step.audit.success else 'FAILED'}\n" + "\n".join(f"- {d}" for d in (step.audit.details or []))
+    if step.coding_result:
+        cr = step.coding_result
+        return f"call_coding_agent: {cr.status}\nSummary: {cr.summary}\nChanged: {', '.join(cr.changed_files) or 'none'}"
+    return f"Action: {step.action}({step.stage_hint})"
 
 
 # ── LLM call ──────────────────────────────────────────────────────
 
-def call_llm(task: ReproTask, messages: list[dict], *, trace_label: str = "") -> str:
-    """Call the LLM and return the response text."""
+def call_llm(task: ReproTask, system: str, user: str, *, trace_label: str = "") -> str:
+    """Call the LLM with a fresh system+user pair. No chat history."""
     if task.mock_llm:
-        return _mock_response(messages)
-    return _openai_compatible(task, messages, trace_label=trace_label)
+        return _mock_response(user)
+    return _openai_compatible(task, system, user, trace_label=trace_label)
 
 
-def _openai_compatible(task: ReproTask, messages: list[dict], *, trace_label: str = "") -> str:
+def _openai_compatible(task: ReproTask, system: str, user: str, *, trace_label: str = "") -> str:
     api_key = os.environ.get(task.api_key_env)
     if not api_key:
         raise RuntimeError(f"{task.api_key_env} is not set. Use --mock-llm for local testing.")
     model = task.model or "gpt-4.1-mini"
-    body = {"model": model, "messages": messages, "temperature": 0.2}
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0.2,
+    }
     url = _chat_completions_url(task.api_base)
     req = urllib.request.Request(
         url,
@@ -186,40 +310,31 @@ def _openai_compatible(task: ReproTask, messages: list[dict], *, trace_label: st
         data = json.loads(resp.read().decode("utf-8"))
     text = data["choices"][0]["message"]["content"].strip()
     if trace_label:
-        _write_llm_trace(task, trace_label, messages, text)
+        _write_llm_trace(task, trace_label, system, user, text)
     return text
 
 
-def _write_llm_trace(task: ReproTask, trace_label: str, messages: list[dict], response: str) -> None:
-    """Save LLM prompt and response to the workspace logs directory."""
-    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", trace_label).strip("_") or "llm"
-    logs_dir = task.workspace_dir / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
-    prefix = logs_dir / f"llm_{stamp}_{safe}"
-    prompt_text = "\n\n".join(
-        f"[{m['role']}]\n{m['content']}" for m in messages
-    )
-    (prefix.with_suffix(".prompt.txt")).write_text(prompt_text, encoding="utf-8")
-    (prefix.with_suffix(".response.txt")).write_text(response, encoding="utf-8")
-
-
 def _chat_completions_url(api_base: str) -> str:
-    """Build the chat completions endpoint URL."""
     base = api_base.rstrip("/")
     if base.endswith("/chat/completions"):
         return base
     return base + "/chat/completions"
 
 
-def _mock_response(messages: list[dict]) -> str:
-    """Deterministic mock for tests."""
-    last = messages[-1]["content"] if messages else ""
-    # initial context → run commands; after results → finish
-    if "Begin." in last:
+def _write_llm_trace(task: ReproTask, trace_label: str, system: str, user: str, response: str) -> None:
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", trace_label).strip("_") or "llm"
+    logs_dir = task.workspace_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+    prefix = logs_dir / f"llm_{stamp}_{safe}"
+    (prefix.with_suffix(".prompt.txt")).write_text(
+        f"[system]\n{system}\n\n[user]\n{user}", encoding="utf-8")
+    (prefix.with_suffix(".response.txt")).write_text(response, encoding="utf-8")
+
+
+def _mock_response(user: str) -> str:
+    if "Begin." in user or "What is your first action" in user:
         return '{"thinking": "mock: probe the repo", "action": "run_commands", "stage_hint": "probe", "commands": ["head -20 README.md"]}'
-    if "Start." in last:
-        return '{"thinking": "mock: probe the repo", "action": "run_commands", "stage_hint": "probe", "commands": ["head -20 README.md"]}'
-    if "Result" in last:
+    if "Last Result" in user:
         return '{"thinking": "mock: done", "action": "finish", "finish_status": "completed", "finish_summary": "Mock run completed."}'
     return '{"thinking": "mock: done", "action": "finish", "finish_status": "completed", "finish_summary": "Mock run completed."}'

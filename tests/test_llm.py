@@ -1,4 +1,4 @@
-from reproagent.llm import _chat_completions_url, SYSTEM_PROMPT, build_context_block
+from reproagent.llm import _chat_completions_url, SYSTEM_PROMPT, build_initial_context
 from reproagent.models import EnvironmentInfo, RepoContext, ReproTask
 
 
@@ -36,7 +36,7 @@ def test_build_context_includes_goal_and_env(tmp_path):
         hardware_text="GPU: RTX 4090",
     )
     env = EnvironmentInfo(env_name="repro_test", created=True)
-    text = build_context_block(task, ctx, env)
+    text = build_initial_context(task, ctx, env)
     assert "Run bounded MNIST" in text
     assert "repro_test" in text
     assert "freshly created" in text
@@ -47,5 +47,5 @@ def test_build_context_reused_env(tmp_path):
     task = ReproTask(paper_url="p", repo_url="r", workspace_dir=tmp_path, experiment_goal="g")
     ctx = RepoContext(repo_path=tmp_path / "repo", hardware_text="cpu", readme_text="r", file_tree="f")
     env = EnvironmentInfo(env_name="repro_test", created=False)
-    text = build_context_block(task, ctx, env)
+    text = build_initial_context(task, ctx, env)
     assert "reused" in text.lower()

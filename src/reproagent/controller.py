@@ -17,12 +17,13 @@ from .coding import run_coding_agent_for_patch
 from .context import collect_context
 from .env import ensure_environment, find_conda
 from .integrations.codingagent import configured_codingagent_path
-from .llm import SYSTEM_PROMPT, build_context_block, call_llm
+from .llm import SYSTEM_PROMPT, build_initial_context, build_turn_prompt, call_llm
 from .models import (
     AgentAction,
     AgentObservation,
     AgentState,
     CommandPlan,
+    ContextPolicy,
     EnvironmentInfo,
     RepoContext,
     ReproAgentVersion,
@@ -130,47 +131,20 @@ def _parse_action(text: str) -> AgentAction | None:
     )
 
 
-def _format_commands_result(results, workspace: Path) -> str:
-    """Format command results as text for the LLM to read."""
-    lines: list[str] = []
-    for r in results:
-        tag = "OK" if r.exit_code == 0 else "FAIL"
-        lines.append(f"$ {r.command}")
-        lines.append(f"exit={r.exit_code}  duration={r.duration_seconds}s  [{tag}]")
-        for label, path in [("stdout", r.stdout_path), ("stderr", r.stderr_path)]:
-            if path.exists():
-                text = path.read_text(encoding="utf-8", errors="replace")
-                if text.strip():
-                    lines.append(f"--- {label} ({len(text)} bytes) ---")
-                    lines.append(text[-3000:])
-    return "\n".join(lines)
-
-
-def _format_audit_result(audit) -> str:
-    lines = [f"Audit: {'PASSED' if audit.success else 'FAILED'}"]
-    if audit.details:
-        lines.append("\n".join(f"- {d}" for d in audit.details))
-    if audit.requires_repair:
-        lines.append("⚠ REPAIR REQUIRED")
-    return "\n".join(lines)
-
-
-def _format_coding_result(result) -> str:
-    lines = [
-        f"CodingAgent status: {result.status}",
-        f"Summary: {result.summary}",
-    ]
-    if result.changed_files:
-        lines.append("Changed files:")
-        lines.extend(f"  - {f}" for f in result.changed_files)
-    if result.diff_path:
-        lines.append(f"Diff: {result.diff_path}")
-    if result.report_path:
-        lines.append(f"Report: {result.report_path}")
-    if result.residual_risks:
-        lines.append("Risks:")
-        lines.extend(f"  - {r}" for r in result.residual_risks)
-    return "\n".join(lines)
+def _update_file_cache(state: AgentState, observation: AgentObservation) -> None:
+    """Cache file reads for context reuse — avoid repeating full file dumps."""
+    for r in observation.command_results:
+        cmd = r.command.strip()
+        # match common file-reading patterns: cat/head/tail/sed on a specific file
+        m = re.match(r"(?:cat|head(?:\s+-n\s+\d+)?|tail(?:\s+-n\s+\d+)?|sed\s+[^ ]+)\s+(.+)", cmd)
+        if not m:
+            continue
+        path = m.group(1).strip().strip("'\"")
+        # only cache repo-relative paths
+        if not path.startswith("/"):
+            full = (state.repo_context.repo_path if state.repo_context else state.task.workspace_dir) / path
+            if full.exists():
+                state.file_cache[path] = full.read_text(encoding="utf-8", errors="replace")
 
 
 # ── tools ─────────────────────────────────────────────────────────
@@ -332,30 +306,26 @@ def run_controller(task: ReproTask) -> AgentState:
         repo_context=repo_context,
         environment=environment,
     )
-
-    # ── build initial conversation ────────────────────────────
-    context = build_context_block(task, repo_context, environment)
-    history: list[dict] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": context},
-    ]
+    policy = ContextPolicy.for_model(task.model)
 
     # ── loop ──────────────────────────────────────────────────
     for _step in range(task.max_steps):
-        remaining = task.max_steps - len(state.steps) - 1
-        if remaining <= 1 and not _step >= task.max_steps - 1:
-            history.append({
-                "role": "user",
-                "content": f"Only {remaining} step(s) remain. Finish soon or force-finish will be applied.",
-            })
+        # build prompt fresh from current state
+        if len(state.steps) == 0:
+            user_prompt = build_initial_context(task, repo_context, environment)
+        else:
+            user_prompt = build_turn_prompt(state, policy)
 
-        # call LLM
-        raw = call_llm(task, history, trace_label=f"step_{len(state.steps) + 1:02d}")
-        history.append({"role": "assistant", "content": raw})
+        raw = call_llm(task, SYSTEM_PROMPT, user_prompt,
+                       trace_label=f"step_{len(state.steps) + 1:02d}")
 
         action = _parse_action(raw)
         if action is None:
-            history.append({"role": "user", "content": "Could not parse action. Return valid JSON with an 'action' field."})
+            # Add a fake step so the next turn's prompt reflects the error
+            state.steps.append(AgentObservation(
+                step=len(state.steps) + 1, action="parse_error", stage_hint="error",
+                error="Could not parse JSON action. Return a valid JSON object with an 'action' field.",
+            ))
             continue
 
         _log(f"step {len(state.steps) + 1}: {action.action} — {action.thinking[:120]}")
@@ -364,30 +334,29 @@ def run_controller(task: ReproTask) -> AgentState:
         observation: AgentObservation
         if action.action == "run_commands":
             observation = _tool_run_commands(action, state)
-            feedback = _format_commands_result(observation.command_results, task.workspace_dir)
         elif action.action == "audit_env":
             observation = _tool_audit_env(state)
-            feedback = _format_audit_result(observation.audit) if observation.audit else observation.error
         elif action.action == "call_coding_agent":
             observation = _tool_call_coding_agent(action, state)
-            feedback = _format_coding_result(observation.coding_result) if observation.coding_result else observation.error
         else:  # finish
             state.status = action.finish_status or "completed"
             state.final_summary = action.finish_summary
             _log(f"finish: {state.status}")
             break
 
+        # track file reads for context cache
+        _update_file_cache(state, observation)
         state.steps.append(observation)
-        history.append({"role": "user", "content": f"## Result\n\n{feedback}\n\nWhat is your next action?"})
 
     else:
-        # loop exhausted
         _log("step budget exhausted — forcing finish")
         if state.status == "running":
             state.status = "completed_with_failures"
             state.final_summary = "Step budget exhausted before explicit finish."
-            history.append({"role": "user", "content": "Step budget exhausted. The run ends here. This is the final state."})
-            final_raw = call_llm(task, history)
+            # one last call to generate a final summary
+            user_prompt = build_turn_prompt(state, policy)
+            user_prompt += "\n\nStep budget exhausted. The run ends here. Write a brief final summary."
+            final_raw = call_llm(task, SYSTEM_PROMPT, user_prompt, trace_label="force_finish")
             state.final_summary = final_raw[:5000]
 
     # ── write report ──────────────────────────────────────────
