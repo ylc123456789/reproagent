@@ -40,7 +40,9 @@ def _is_probe_command(command: str) -> bool:
         return True
     if lowered.startswith(("python -m py_compile ", "python3 -m py_compile ")):
         return True
-    allowed_prefixes = ("ls", "find", "rg", "grep", "sed", "cat", "head", "tail", "wc", "pwd", "python -c", "python3 -c")
+    allowed_prefixes = ("ls", "find", "rg", "grep", "sed", "cat", "head", "tail", "wc", "pwd",
+                        "which ", "python --version", "python3 --version",
+                        "python -c", "python3 -c")
     return lowered.startswith(allowed_prefixes)
 
 

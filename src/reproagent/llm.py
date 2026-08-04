@@ -64,6 +64,7 @@ Format:
 - Follow the mirror policy from the context when choosing package indexes.
 - If a command fails, read the error and fix it. If a dependency is missing, install it.
 - If pip install fails with a specific version, try without the version pin or from a different index.
+- After installing major dependencies (torch, tensorflow, etc.), re-run audit_env so you and any future call_coding_agent have accurate environment information.
 
 ### Experiment
 - Probe the script interface (--help, head, grep) before running training.
