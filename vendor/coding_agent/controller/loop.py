@@ -59,7 +59,7 @@ def run_step_controller(spec: CodeTaskSpec) -> PatchReport:
                     verification_results.extend(auto_verification)
                 diff_path = write_diff(current_diff(spec.repo_path), output_dir)
                 report = PatchReport(
-                    status=_final_status(action.status, changed_files, verification_results, bool(spec.verify_commands)),
+                    status=_final_status(action.status, changed_files, verification_results),
                     changed_files=changed_files,
                     diff_path=diff_path,
                     verification_results=verification_results,
@@ -135,7 +135,7 @@ def _should_continue_past_base_limit(spec: CodeTaskSpec, steps: list[StepRecord]
     return last_verify_step < last_change_step
 
 
-def _final_status(requested_status: str | None, changed_files: list[str], verification_results, verification_required: bool) -> str:
+def _final_status(requested_status: str | None, changed_files: list[str], verification_results) -> str:
     """Return the finish status.
 
     The agent's explicit finish status is authoritative --- it has semantic

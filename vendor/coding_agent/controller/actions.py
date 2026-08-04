@@ -350,7 +350,7 @@ def _search_repo(repo: Path, query: str, limit: int = 80) -> str:
             ensure_path_allowed(repo, rel)
         except SafetyError:
             continue
-        if path.suffix.lower() not in {".py", ".md", ".txt", ".toml", ".yaml", ".yml", ".json", ".sh"}:
+        if path.suffix.lower() not in TEXT_SUFFIXES:
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
         for number, line in enumerate(text.splitlines(), start=1):

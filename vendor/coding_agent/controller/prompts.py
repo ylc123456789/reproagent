@@ -42,7 +42,7 @@ def choose_next_action(spec: CodeTaskSpec, state: AgentState, context, client: L
         "Use exact old_text or anchor_text copied from the current file. For inserts, prefer a unique multi-line "
         "anchor that includes nearby context instead of a short common line. Use apply_patch only for changes that are not suitable "
         "for exact structured edits. Use finish only after the diff and verification evidence satisfy the task, or when failure is clear. "
-        "Never silently change research semantics such as model architecture, loss, optimizer, dataset split, or metric. "
+        "Never silently change existing behavior; prefer adding new code over modifying existing logic. "
         "For insert_before/insert_after anchors: prefer 2-4 adjacent lines as anchor, including the line above the target. "
         "Never use anchors consisting only of whitespace and punctuation (e.g. a closing parenthesis alone). "
         "When nesting is deep, include the parent construct opening line in the anchor. "

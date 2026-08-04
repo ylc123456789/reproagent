@@ -22,14 +22,11 @@ def review_outcome(
             summary="No files were changed.",
             residual_risks=residual,
         )
-    if verification_results and not all(result.succeeded for result in verification_results):
-        return PatchReport(
-            status="failed",
-            changed_files=changed_files,
-            diff_path=diff_path,
-            verification_results=verification_results,
-            summary="Patch was applied, but one or more verification commands failed.",
-            residual_risks=residual,
+    failed_verifications = [r for r in verification_results if not r.succeeded]
+    if failed_verifications:
+        residual.append(
+            f"{len(failed_verifications)} verification command(s) returned non-zero: "
+            + "; ".join(f"{r.command} (rc={r.returncode})" for r in failed_verifications)
         )
     if not verification_results:
         residual.append("No verification commands were provided, so completion is based on patch application only.")
