@@ -218,10 +218,15 @@ def _tool_call_coding_agent(action: AgentAction, state: AgentState) -> AgentObse
             stage_hint="coding",
             error="CodingAgent is not enabled (use --enable-coding-agent)",
         )
+    help_cmds: list[str] = []
+    for step in state.steps:
+        for r in step.command_results:
+            if r.exit_code == 0 and "--help" in r.command:
+                help_cmds.append(r.command)
     plan = CommandPlan(
         stage="experiment",
         summary=action.coding_goal or "patch",
-        commands=[],
+        commands=help_cmds[:3],
         needs_user_input=action.coding_issues,
     )
     try:
@@ -312,7 +317,7 @@ def run_controller(task: ReproTask) -> AgentState:
     for _step in range(task.max_steps):
         # build prompt fresh from current state
         if len(state.steps) == 0:
-            user_prompt = build_initial_context(task, repo_context, environment)
+            user_prompt = build_initial_context(task, repo_context, environment, policy)
         else:
             user_prompt = build_turn_prompt(state, policy)
 

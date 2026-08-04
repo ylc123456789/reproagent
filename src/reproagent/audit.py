@@ -29,18 +29,17 @@ try:
     data["pip_version"] = pip.stdout.strip() or pip.stderr.strip()
 except Exception as exc:
     data["pip_version_error"] = str(exc)
-try:
-    import torch
-
-    data["torch"] = {
-        "version": getattr(torch, "__version__", None),
-        "file": getattr(torch, "__file__", None),
-        "cuda_compiled": getattr(torch.version, "cuda", None),
-        "cuda_available": torch.cuda.is_available(),
-        "device_count": torch.cuda.device_count(),
-    }
-except Exception as exc:
-    data["torch_error"] = str(exc)
+for lib, check_gpu in ((torch, True), (tensorflow, False), (jax, False)):
+    try:
+        mod = __import__(lib)
+        info = {version: getattr(mod, __version__, None)}
+        if check_gpu:
+            info[cuda_compiled] = getattr(getattr(mod, version, None), cuda, None)
+            info[cuda_available] = bool(mod.cuda.is_available())
+            info[device_count] = mod.cuda.device_count()
+        data[lib] = info
+    except Exception:
+        pass
 print(json.dumps(data, indent=2, ensure_ascii=False))
 """
 

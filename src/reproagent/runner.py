@@ -194,7 +194,8 @@ def _command_env(workspace: Path) -> dict[str, str]:
     env.setdefault("PYTHONUNBUFFERED", "1")
     omp = env.get("OMP_NUM_THREADS", "").strip()
     if not omp.isdigit() or int(omp) <= 0:
-        env["OMP_NUM_THREADS"] = "16"
+        cpu_count = os.cpu_count() or 4
+        env["OMP_NUM_THREADS"] = str(min(16, cpu_count))
     cache = env.get("REPROAGENT_DATASET_CACHE", "")
     if cache:
         try:

@@ -98,9 +98,11 @@ Format:
 
 # ── context builder ──────────────────────────────────────────────
 
-def build_initial_context(task: ReproTask, repo_context: RepoContext, environment: EnvironmentInfo) -> str:
+def build_initial_context(task: ReproTask, repo_context: RepoContext, environment: EnvironmentInfo,
+                           policy: ContextPolicy | None = None) -> str:
     """Build the very first user message — only called once at the start."""
     env_text = _env_line(environment)
+    readme_limit = policy.readme_chars if policy else 16000
     return f"""## Task
 
 Paper: {task.paper_url}
@@ -124,7 +126,7 @@ Max steps: {task.max_steps}{_cache_line(task)}
 
 ## README / docs
 
-{repo_context.readme_text[:16000]}
+{repo_context.readme_text[:readme_limit]}
 
 ---
 
@@ -144,6 +146,8 @@ def build_turn_prompt(state: AgentState, policy: ContextPolicy) -> str:
     # --- task ---
     parts.append("## Task")
     parts.append(f"Goal: {state.task.experiment_goal}")
+    parts.append(f"Paper: {state.task.paper_url}")
+    parts.append(f"Repo: {state.task.repo_url}")
     remaining = state.task.max_steps - len(state.steps)
     parts.append(f"Timeout: {state.task.timeout_seconds}s | Steps used: {len(state.steps)}/{state.task.max_steps} (max)")
     if state.task.dataset_cache_dir:
