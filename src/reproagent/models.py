@@ -187,6 +187,7 @@ class ContextPolicy(BaseModel):
 
     @classmethod
     def for_model(cls, model: str | None) -> "ContextPolicy":
+        """Resolve context policy limits for a given model by its context window size."""
         window = MODEL_CONTEXT_WINDOWS.get((model or "").lower().split("/")[-1], 128_000)
         if window >= 500_000:
             return cls(step_history=15, file_cache_count=10, file_cache_chars=8000,

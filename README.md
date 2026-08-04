@@ -64,22 +64,6 @@ reproagent run \
   --mock-llm
 ```
 
-## Plan Without Running Experiments
-
-Use `--plan-only` when you want the agent to set up the environment, run safe probe commands such as `--help`/config inspection, and write the final proposed experiment plan without starting training or evaluation.
-
-```bash
-reproagent run \
-  --paper https://arxiv.org/abs/xxxx.xxxxx \
-  --repo https://github.com/user/project \
-  --workspace runs/plan-demo \
-  --experiment-goal "Run a bounded GPU training experiment and report accuracy, loss, runtime, and deviations." \
-  --api-base https://api.deepseek.com/v1 \
-  --api-key-env DEEPSEEK_API_KEY \
-  --model deepseek-v4pro \
-  --plan-only
-```
-
 ## Run with OpenAI
 
 ```bash
@@ -110,7 +94,7 @@ Use the exact model name provided by your API provider.
 
 ## CodingAgent Location
 
-`reproagent` can call CodingAgent when `--enable-coding-agent` is set and final-plan validation reports that a repo-local patch is needed. CodingAgent is treated as an external dependency, not as a fixed nested repository path.
+`reproagent` can call CodingAgent when `--enable-coding-agent` is set. The LLM decides autonomously when a code modification is needed (e.g. adding a missing metric to script output). CodingAgent is treated as an external dependency, not as a fixed nested repository path.
 
 Configure its checkout path in this priority order:
 
@@ -146,23 +130,18 @@ reproagent run \
 
 ## Execution Model
 
-The MVP is conda-first:
+Reproagent uses an agent loop — the LLM decides every step, not a fixed pipeline:
 
-```text
-1. clone repo
-2. collect README/docs/file-tree context
-3. create a task-specific conda env
-4. ask LLM for dependency setup commands needed for the experiment goal
-5. run setup commands with conda run -n <env>
-6. ask LLM for safe probe commands such as --help/config inspection
-7. run probe commands and feed their logs back to the LLM
-8. ask LLM for the final experiment/eval/demo plan that directly attempts the goal
-9. optionally stop with --plan-only, or confirm before running experiment commands
-10. run commands with conda run -n <env>
-11. write result.md and state.json
-```
+1. Clone the repository and create a task-specific conda environment.
+2. Collect hardware, file-tree, and README context.
+3. The LLM chooses actions: install dependencies, audit the environment,
+   probe the script interface, run experiments, delegate to CodingAgent,
+   or finish with a structured report.
+4. Every action is executed, the result is observed, and the LLM decides
+   the next step — no hard-coded stage boundaries.
 
-LLM commands should not contain `conda activate`, `conda create`, or `conda run`; `reproagent` wraps commands itself.
+LLM commands should not contain `conda activate`, `conda create`, or `conda run`;
+`reproagent` wraps commands itself.
 
 ## Output
 

@@ -211,6 +211,7 @@ def _cache_line(task: ReproTask) -> str:
 
 
 def _mirror_block(task: ReproTask) -> str:
+    """Render the mirror policy block with profile-specific guidance."""
     profile = task.mirror_profile
     if profile == "none":
         return "Mirror policy: none."
@@ -229,6 +230,7 @@ def _mirror_block(task: ReproTask) -> str:
 
 
 def _compact_audit(audit) -> str:
+    """Format audit details as compact bullet lines."""
     if not audit.details:
         return "No audit data."
     return "\n".join(f"- {d}" for d in audit.details)
@@ -300,6 +302,7 @@ def call_llm(task: ReproTask, system: str, user: str, *, trace_label: str = "") 
 
 
 def _openai_compatible(task: ReproTask, system: str, user: str, *, trace_label: str = "") -> str:
+    """Call an OpenAI-compatible chat completions API and return the response text."""
     api_key = os.environ.get(task.api_key_env)
     if not api_key:
         raise RuntimeError(f"{task.api_key_env} is not set. Use --mock-llm for local testing.")
@@ -346,6 +349,7 @@ def _write_llm_trace(task: ReproTask, trace_label: str, system: str, user: str, 
 
 
 def _mock_response(user: str) -> str:
+    """Deterministic mock actions for tests — returns probe then finish."""
     if "Begin." in user or "What is your first action" in user:
         return '{"thinking": "mock: probe the repo", "action": "run_commands", "stage_hint": "probe", "commands": ["head -20 README.md"]}'
     if "Last Result" in user:

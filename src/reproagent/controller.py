@@ -105,7 +105,7 @@ def _format_version(version: ReproAgentVersion | None) -> str:
 
 
 def _parse_action(text: str) -> AgentAction | None:
-    """Extract a JSON action from LLM response text."""
+    """Extract a valid JSON action from LLM response text. Returns None on parse failure."""
     match = re.search(r"\{[^{}]*\"action\"[^{}]*\}", text, re.DOTALL)
     if not match:
         return None
@@ -147,6 +147,7 @@ def _update_file_cache(state: AgentState, observation: AgentObservation) -> None
 # ── tools ─────────────────────────────────────────────────────────
 
 def _tool_run_commands(action: AgentAction, state: AgentState) -> AgentObservation:
+    """Execute shell commands via the runner, respecting safety and confirm-before-experiment."""
     commands = action.commands
     if not commands:
         return AgentObservation(
@@ -187,6 +188,7 @@ def _tool_run_commands(action: AgentAction, state: AgentState) -> AgentObservati
 
 
 def _tool_audit_env(state: AgentState) -> AgentObservation:
+    """Run environment audit: check Python, pip, torch/tf/jax, GPU availability."""
     from .models import EnvironmentAudit as EA  # noqa
 
     try:
@@ -208,6 +210,7 @@ def _tool_audit_env(state: AgentState) -> AgentObservation:
 
 
 def _tool_call_coding_agent(action: AgentAction, state: AgentState) -> AgentObservation:
+    """Delegate a code modification to CodingAgent and collect the result."""
     if not state.task.enable_coding_agent:
         return AgentObservation(
             step=len(state.steps) + 1,

@@ -88,14 +88,14 @@ def normalize_text(text: str | None) -> str:
 
 
 def normalize_plan_text(text: str | None) -> str | None:
-    """Normalize normalize plan text."""
+    """Normalize a single plan text value; returns None for None input."""
     if text is None:
         return None
     return normalize_text(text)
 
 
 def normalize_text_list(items: list[str]) -> list[str]:
-    """Normalize normalize text list."""
+    """Normalize every string in a list through normalize_text."""
     return [normalize_text(item) for item in items]
 
 

@@ -19,54 +19,42 @@ Output:
 result.md
 state.json
 logs/
+patches/
 ```
 
-The central goal is to let an LLM read repository context, paper reference, and the user-provided experiment goal, decide how a human would try to reproduce that target, probe the repository interface, produce a concrete execution plan, execute approved commands inside an isolated conda environment, and revise the plan after failures.
+The LLM drives the entire process in an agent loop: it observes state, chooses an
+action (install dependencies, probe the repository, run experiments, delegate to
+CodingAgent), executes it, and repeats until the experiment goal is satisfied or
+the step budget is exhausted.
 
-## 2. Project Path
-
-Official development directory:
-
-```text
-/home/cyl/reproagent
-```
-
-Sibling projects:
-
-```text
-/home/cyl/AutoResearchClaw
-/home/cyl/auto-researcher
-/home/cyl/reproagent
-```
-
-Use Ubuntu-D for development, dependency installation, and command execution.
-
-## 3. File Structure
-
-Keep the project small:
+## 2. File Structure
 
 ```text
 src/reproagent/
   __init__.py
   models.py                    # shared Pydantic data structures
-  context.py                   # clone repo and collect README/file evidence
-  env.py                       # conda environment creation and command wrapping
-  llm.py                       # LLM prompts and OpenAI-compatible API calls
+  controller.py                # agent loop — the core of reproagent
+  llm.py                       # system prompt, turn prompt builder, LLM API calls
   runner.py                    # command safety checks, execution, live log streaming
-  validation.py                # conservative final experiment-plan validation
-  coding.py                    # reproagent patch-cycle orchestration
-  integrations/codingagent.py  # only CodingAgent location/import boundary
+  audit.py                     # post-setup environment audit (torch/tf/jax)
+  env.py                       # conda environment creation and command wrapping
+  context.py                   # clone repo and collect README/file-tree/hardware
+  coding.py                    # CodingAgent patch orchestration
+  hardware.py                  # lightweight hardware context collection
+  text.py                      # text normalization for LLM output and reports
   report.py                    # write result.md and state.json
-  main.py                      # CLI and top-level workflow
+  main.py                      # CLI entry point
+  integrations/
+    codingagent.py             # CodingAgent location/import boundary
 ```
 
-## 4. Environment Strategy
+## 3. Environment Strategy
 
 MVP uses conda only.
 
 ```text
-environment.yml present -> conda env create -n <env> -f environment.yml
-otherwise               -> conda create -n <env> python=<version> -y
+environment.yml present → conda env create -n <env> -f environment.yml
+otherwise               → conda create -n <env> python=<version> -y
 ```
 
 All LLM-proposed commands run through:
@@ -75,97 +63,64 @@ All LLM-proposed commands run through:
 conda run -n <env> bash -c "<command>"
 ```
 
-This avoids fragile non-interactive `conda activate` behavior.
+## 4. Workflow (Agent Loop)
 
-Docker is intentionally not implemented yet. If a repo contains a Dockerfile, the LLM can see it in the file tree, but the runner will still use conda for now.
+The controller runs a single loop. There are no fixed stages — the LLM decides
+what to do next based on the current state.
 
-## 5. Workflow
+```
+initialize:
+  → clone repo
+  → create conda env
+  → collect hardware / file-tree / README context
 
-Outer workflow is linear:
-
-```text
-1. Build Context
-2. Prepare Conda Environment
-3. Environment Loop
-4. Probe Stage
-5. Final Experiment Planning
-6. Experiment Loop
-7. Result Review
-8. Write Report
+loop (max N steps):
+  → build prompt from current state (compacted history + file cache)
+  → LLM returns JSON action
+  → execute action via one of four tools:
+      run_commands      — execute shell commands
+      audit_env          — check installed packages and GPU
+      call_coding_agent  — delegate code modifications to CodingAgent
+      finish             — write final report and end the run
+  → observe result, update state, repeat
 ```
 
-Each loop can retry locally. A failed environment command does not restart the whole run; it returns to the environment planner with the latest logs. A failed experiment command returns to the experiment planner with the latest logs.
+Tools are described in the system prompt. The LLM can freely switch between
+"stages" — it can install a missing dependency at any time, re-audit after
+changes, or call CodingAgent whenever a code change is needed.
 
-```text
-Build Context
-  -> Create/reuse conda env
-  -> Env plan by LLM for the experiment goal
-  -> Run env commands inside conda env
-  -> if failed: send logs back to LLM and retry env stage
-  -> Probe plan by LLM for safe interface discovery
-  -> Run only help/config/listing/inline-inspection probe commands
-  -> Final experiment plan by LLM for the experiment goal, using probe logs
-  -> Validate final plan for obvious goal mismatches, unsupported metric claims, unsafe logging commands, and missing explicit budgets
-  -> if validation marks needs_patch/blocked/unsafe: write the issue and do not execute experiment commands
-  -> if --plan-only: write planned experiment and stop before training/evaluation
-  -> optionally ask user to confirm the experiment plan
-  -> Run experiment commands inside conda env with live output streaming
-  -> if failed: send logs back to LLM and retry experiment stage
-  -> Result review
-```
+## 5. Context Management
+
+Context is rebuilt from structured state each turn, not appended as raw chat
+history. This keeps prompts focused on current decision-making.
+
+- System prompt: static rules, tool schemas, safety constraints.
+- Turn prompt: goal, task params, environment state, mirror policy, latest
+  audit, cached file reads, compacted step history, full last-step result.
+- Old steps are compacted to single-line summaries with output tails.
+- File reads are cached and de-duplicated.
+- Context policy scales with the model window (DeepSeek 1M → loose limits,
+  GPT-4o 128K → tighter limits).
 
 ## 6. LLM API Strategy
 
-`llm.py` supports OpenAI-compatible chat completions endpoints:
+OpenAI-compatible chat completions endpoint. Each turn sends system + user
+as a fresh pair of messages — no accumulated chat history.
 
 ```text
 api_base + /chat/completions
 api_key_env
 model
+temperature 0.2
 ```
 
-Examples:
+All prompt/response pairs are saved to `logs/` for debugging.
 
-```text
-OpenAI:   api_base=https://api.openai.com/v1, api_key_env=OPENAI_API_KEY
-DeepSeek: api_base=https://api.deepseek.com/v1, api_key_env=DEEPSEEK_API_KEY
-```
+## 7. CodingAgent Integration
 
-It does not yet implement native Claude or Gemini SDKs.
-
-## 7. LLM Memory / Session Design
-
-API models should not be treated as having reliable permanent memory. `reproagent` stores the memory itself:
-
-```text
-state.json
-context/context_summary.md
-logs/*.stdout
-logs/*.stderr
-```
-
-Within a stage, the system passes compact stage history and relevant tail logs back to the LLM. Probe logs are included before final experiment planning so the model can turn discovered CLI/config parameters into explicit commands instead of relying on script defaults.
-
-## 8. Not Yet Doing
-
-This MVP does not yet do:
-
-```text
-automatic SOTA discovery
-automatic repository discovery
-Docker backend
-large dataset management
-paper PDF table verification
-full blackboard architecture
-web UI
-```
-
-The next milestone is: improve final-plan validation, especially checking that goal words such as bounded, GPU, loss, accuracy, or full reproduction are reflected in explicit commands/configs before expensive runs start.
-
-
-## 9. CodingAgent Integration
-
-CodingAgent is a separate generic programming-agent project. ReproAgent may call it when `--enable-coding-agent` is set and final-plan validation reports `needs_patch`, but ReproAgent must not rely on CodingAgent living at a fixed path inside the ReproAgent checkout.
+CodingAgent is a separate generic programming-agent project. The agent calls it
+via the `call_coding_agent` tool when a code modification is needed (e.g. adding
+a missing metric to the script output).
 
 Configuration priority:
 
@@ -176,10 +131,22 @@ Config file:      agents.codingagent_path
 Fallback:         importable `coding_agent` package, if available
 ```
 
-`src/reproagent/integrations/codingagent.py` is the only module that resolves the path, validates that it looks like a CodingAgent checkout, and imports the CodingAgent Python API. Other ReproAgent modules call this adapter instead of constructing paths or importing CodingAgent directly.
+`src/reproagent/integrations/codingagent.py` is the only module that resolves
+the path, validates the checkout, and imports the CodingAgent API.
 
-`reproagent` may keep a synchronized `vendor/coding_agent/` source copy, but packaging is restricted to `reproagent*` so `pip install -e reproagent` does not install or shadow the global `coding_agent` package in a shared controller environment. Use `--codingagent-path` or `CODINGAGENT_PATH` to select the intended CodingAgent checkout explicitly.
+ReproAgent owns environment creation, dependency installation, audit, hardware
+context, and deciding when to call CodingAgent. CodingAgent owns minimal
+repo-local code/config edits, verification inside the prepared environment,
+and patch report/diff generation.
 
-Relative CLI and environment paths resolve against the current working directory. Relative config values resolve against the config file directory. Invalid paths fail with explicit errors.
+## 8. Not Yet Implemented
 
-ReproAgent owns environment creation, dependency installation, audit, hardware context, experiment-goal validation, and deciding when to call CodingAgent. CodingAgent owns minimal repo-local code/config edits, verification inside the prepared environment, and patch report/diff generation. CodingAgent is explicitly instructed not to install, upgrade, or remove dependencies.
+```text
+Docker backend
+cloud / SSH execution backend
+paper PDF parsing
+automatic SOTA discovery
+full benchmark / table reproduction planning
+multi-GPU scheduling
+native Claude / Gemini SDKs
+```
