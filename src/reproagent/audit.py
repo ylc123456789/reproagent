@@ -29,19 +29,31 @@ try:
     data["pip_version"] = pip.stdout.strip() or pip.stderr.strip()
 except Exception as exc:
     data["pip_version_error"] = str(exc)
-for lib, check_gpu in ((torch, True), (tensorflow, False), (jax, False)):
-    try:
-        mod = __import__(lib)
-        info = {version: getattr(mod, __version__, None)}
-        if check_gpu:
-            info[cuda_compiled] = getattr(getattr(mod, version, None), cuda, None)
-            info[cuda_available] = bool(mod.cuda.is_available())
-            info[device_count] = mod.cuda.device_count()
-        data[lib] = info
-    except Exception:
-        pass
+try:
+    import torch
+
+    data["torch"] = {
+        "version": getattr(torch, "__version__", None),
+        "file": getattr(torch, "__file__", None),
+        "cuda_compiled": getattr(torch.version, "cuda", None),
+        "cuda_available": torch.cuda.is_available(),
+        "device_count": torch.cuda.device_count(),
+    }
+except Exception as exc:
+    data["torch_error"] = str(exc)
+try:
+    import tensorflow as tf
+    data["tensorflow"] = {"version": getattr(tf, "__version__", None)}
+except Exception:
+    pass
+try:
+    import jax
+    data["jax"] = {"version": getattr(jax, "__version__", None)}
+except Exception:
+    pass
 print(json.dumps(data, indent=2, ensure_ascii=False))
 """
+
 
 def audit_environment(state: ReproState) -> EnvironmentAudit:
     """Inspect the prepared conda env and summarize important mismatches."""
@@ -115,6 +127,9 @@ def audit_environment(state: ReproState) -> EnvironmentAudit:
                         details.append("Likely CPU-only torch install: choose a GPU-capable build compatible with this machine.")
             elif data.get("torch_error"):
                 details.append(f"Torch import: unavailable ({data['torch_error']})")
+            for lib in ("tensorflow", "jax"):
+                if lib in data:
+                    details.append(f"{lib}: version={data[lib].get('version', 'unknown')}")
             stderr_text = (result.stderr or "").lower()
             if "numpy 1.x" in stderr_text or "_array_api not found" in stderr_text or "numpy is not available" in stderr_text:
                 has_warnings = True
@@ -137,12 +152,14 @@ def audit_environment(state: ReproState) -> EnvironmentAudit:
         stderr_path=stderr_path,
     )
 
+
 def _gpu_visible(state: ReproState) -> bool:
     """Return whether CUDA appears visible in audit output."""
     if not state.repo_context:
         return False
     hardware = state.repo_context.hardware_text.lower()
     return "gpu 0:" in hardware or ("nvidia-smi:" in hardware and "not available" not in hardware)
+
 
 def _infer_env_prefix(sys_prefix: str, executable: str) -> Path:
     """Infer the current conda environment prefix."""
@@ -152,6 +169,7 @@ def _infer_env_prefix(sys_prefix: str, executable: str) -> Path:
     if executable_path.parent.name == "bin":
         return executable_path.parent.parent
     return Path("")
+
 
 def _path_is_under(path: str, parent: Path) -> bool:
     """Return whether a path resolves under a parent directory."""
