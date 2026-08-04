@@ -44,28 +44,6 @@ def test_write_result_includes_experiment_goal(tmp_path):
     assert f"Experiment goal: {goal}" in path.read_text(encoding="utf-8")
 
 
-def test_write_result_includes_planned_experiment(tmp_path):
-    from reproagent.models import CommandPlan, ReproState, ReproTask
-    from reproagent.report import write_result
-
-    task = ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path, experiment_goal="Run bounded MNIST")
-    state = ReproState(task=task, status="planned")
-    state.planned_experiment = CommandPlan(
-        stage="experiment",
-        summary="Run one epoch",
-        commands=["python examples/odenet_mnist.py --nepochs 1 --gpu 0"],
-        feasibility="ready_to_run",
-        expected_runtime="minutes",
-    )
-
-    path = write_result(state)
-    text = path.read_text(encoding="utf-8")
-
-    assert "## Planned Experiment" in text
-    assert "--nepochs 1 --gpu 0" in text
-    assert "Feasibility: `ready_to_run`" in text
-
-
 def test_write_result_includes_codingagent_path(tmp_path):
     from reproagent.models import ReproState, ReproTask
     from reproagent.report import write_result

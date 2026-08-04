@@ -16,7 +16,7 @@ def save_state(state: ReproState):
 
 
 def write_result(state: ReproState):
-    """Write the human-readable reproduction result report."""
+    """Legacy report writer — kept for test and infrastructure compatibility."""
     path = state.task.workspace_dir / "result.md"
     state.result_path = path
     lines = [
@@ -82,47 +82,12 @@ def write_result(state: ReproState):
             f"- Audit stdout: `{state.environment_audit.stdout_path}`",
             f"- Audit stderr: `{state.environment_audit.stderr_path}`", "",
         ]
-    lines += _stage_lines("Environment Attempts", state.environment_attempts)
-    lines += _stage_lines("Probe Attempts", state.probe_attempts)
-    if state.planned_experiment:
-        lines += _planned_experiment_lines(state.planned_experiment)
-    lines += _coding_agent_lines(state.coding_agent_results)
-    lines += _stage_lines("Experiment Attempts", state.experiment_attempts)
+    if state.coding_agent_results:
+        lines += _coding_agent_lines(state.coding_agent_results)
     lines += ["## Final Summary", "", state.final_summary or "No final summary.", ""]
     path.write_text(_clean_text("\n".join(lines)), encoding="utf-8")
     save_state(state)
     return path
-
-
-def _stage_lines(title: str, attempts) -> list[str]:
-    """Render report lines for stage attempts."""
-    lines = [f"## {title}", ""]
-    if not attempts:
-        return lines + ["No attempts recorded.", ""]
-    for attempt in attempts:
-        lines += [f"### Attempt {attempt.attempt}", "", f"Plan: {attempt.plan.summary}", ""]
-        if attempt.plan.feasibility:
-            lines += [f"Feasibility: `{attempt.plan.feasibility}`", ""]
-        if attempt.plan.expected_runtime:
-            lines += [f"Expected runtime: {attempt.plan.expected_runtime}", ""]
-        if attempt.plan.needs_user_input:
-            lines += ["Needs user input:"] + [f"- {x}" for x in attempt.plan.needs_user_input] + [""]
-        if attempt.plan.assumptions:
-            lines += ["Assumptions:"] + [f"- {x}" for x in attempt.plan.assumptions] + [""]
-        if not attempt.results:
-            lines += ["No commands executed.", ""]
-        for result in attempt.results:
-            mark = "OK" if result.success else "FAIL"
-            backend = " ".join(result.backend_command) if result.backend_command else "blocked before backend execution"
-            lines += [
-                f"- `{result.command}` -> {mark} exit={result.exit_code}, {result.duration_seconds}s",
-                f"  - backend command: `{backend}`",
-                f"  - stdout: `{result.stdout_path}`",
-                f"  - stderr: `{result.stderr_path}`",
-            ]
-        lines.append("")
-    return lines
-
 
 
 def _coding_agent_lines(results) -> list[str]:
@@ -149,25 +114,6 @@ def _coding_agent_lines(results) -> list[str]:
         lines.append("")
     return lines
 
-
-def _planned_experiment_lines(plan) -> list[str]:
-    """Render report lines for an unexecuted experiment plan."""
-    lines = ["## Planned Experiment", "", f"Plan: {plan.summary}", ""]
-    if plan.feasibility:
-        lines += [f"Feasibility: `{plan.feasibility}`", ""]
-    if plan.expected_runtime:
-        lines += [f"Expected runtime: {plan.expected_runtime}", ""]
-    if plan.needs_user_input:
-        lines += ["Needs user input:"] + [f"- {x}" for x in plan.needs_user_input] + [""]
-    if plan.assumptions:
-        lines += ["Assumptions:"] + [f"- {x}" for x in plan.assumptions] + [""]
-    if plan.commands:
-        lines += ["Commands:"] + [f"{i}. `{command}`" for i, command in enumerate(plan.commands, start=1)] + [""]
-    else:
-        lines += ["No commands planned.", ""]
-    if plan.stop_reason:
-        lines += [f"Stop reason: {plan.stop_reason}", ""]
-    return lines
 
 def _clean_text(text: str) -> str:
     """Normalize optional report text."""
@@ -239,7 +185,7 @@ def write_agent_result(state: AgentState, version: ReproAgentVersion | None = No
         if step.command_results:
             for r in step.command_results:
                 tag = "OK" if r.exit_code == 0 else "FAIL"
-                lines.append(f"- `{r.command}` → {tag} exit={r.exit_code}, {r.duration_seconds}s")
+                lines.append(f"- `{r.command}` -> {tag} exit={r.exit_code}, {r.duration_seconds}s")
                 lines.append(f"  - stdout: `{r.stdout_path}`")
                 lines.append(f"  - stderr: `{r.stderr_path}`")
         if step.audit:

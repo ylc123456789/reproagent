@@ -32,9 +32,6 @@ from .models import (
 from .report import write_agent_result
 from .runner import run_commands
 
-_MAX_STEPS = 30
-_FORCE_FINISH_AFTER = 28  # warn two steps before the hard limit
-
 
 # ── helpers ───────────────────────────────────────────────────────
 
@@ -136,7 +133,7 @@ def _update_file_cache(state: AgentState, observation: AgentObservation) -> None
     for r in observation.command_results:
         cmd = r.command.strip()
         # match common file-reading patterns: cat/head/tail/sed on a specific file
-        m = re.match(r"(?:cat|head(?:\s+-n\s+\d+)?|tail(?:\s+-n\s+\d+)?|sed\s+[^ ]+)\s+(.+)", cmd)
+        m = re.match(r"(?:cat|head(?:\s+-n\s+\d+)?|tail(?:\s+-n\s+\d+)?|sed\s+[^ ]+|grep(?:\s+[^ ]+)*)\s+(.+)", cmd)
         if not m:
             continue
         path = m.group(1).strip().strip("'\"")

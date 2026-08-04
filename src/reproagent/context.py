@@ -53,7 +53,7 @@ def collect_context(task: ReproTask) -> RepoContext:
     """Collect repository, hardware, paper, and README context for planning."""
     repo_path = clone_repo(task)
     commit = _git_commit(repo_path)
-    file_tree = _file_tree(repo_path)
+    file_tree = _file_tree(repo_path, limit=500)
     readme_text = _read_readmes(repo_path)
     hardware_text = collect_hardware_text()
 
