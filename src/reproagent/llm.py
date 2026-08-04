@@ -151,7 +151,7 @@ def build_turn_prompt(state: AgentState, policy: ContextPolicy) -> str:
     remaining = state.task.max_steps - len(state.steps)
     parts.append(f"Timeout: {state.task.timeout_seconds}s | Steps used: {len(state.steps)}/{state.task.max_steps} (max)")
     if state.task.dataset_cache_dir:
-        parts.append(f"Dataset cache: {state.task.dataset_cache_dir}")
+        parts.append(_cache_line(state.task))
     if remaining <= 4:
         parts.append(f"Only {remaining} step(s) remain. Prioritize finishing.")
 
@@ -197,7 +197,13 @@ def _env_line(env: EnvironmentInfo) -> str:
 
 def _cache_line(task: ReproTask) -> str:
     if task.dataset_cache_dir:
-        return f"\nDataset cache: {task.dataset_cache_dir} (torchvision/HF/torch.hub auto-cache)"
+        return (
+            f"\nDataset cache: {task.dataset_cache_dir}\n"
+            "  torchvision, HuggingFace, and torch.hub will auto-cache here.\n"
+            "  Before running experiments, check what is cached: `ls <cache>/`.\n"
+            "  If the script hardcodes a data path (e.g. root='./data/mnist'), symlink:\n"
+            "  `mkdir -p ./data && ln -s <cache>/MNIST ./data/mnist`"
+        )
     return ""
 
 
