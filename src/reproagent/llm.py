@@ -153,7 +153,7 @@ def build_turn_prompt(state: AgentState, policy: ContextPolicy) -> str:
 
     # --- environment ---
     if state.environment:
-        parts.append(f"\n## Environment\n{_env_line(state.environment)}")
+        parts.append(f"\n## Environment\n{_env_line(state.environment)}\n{_mirror_block(state.task)}")
     if state.last_audit:
         parts.append(f"\n## Latest Audit\n{_compact_audit(state.last_audit)}")
 
