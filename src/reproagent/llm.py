@@ -199,10 +199,13 @@ def _cache_line(task: ReproTask) -> str:
     if task.dataset_cache_dir:
         return (
             f"\nDataset cache: {task.dataset_cache_dir}\n"
-            "  torchvision, HuggingFace, and torch.hub will auto-cache here.\n"
-            "  Before running experiments, check what is cached: `ls <cache>/`.\n"
-            "  If the script hardcodes a data path (e.g. root='./data/mnist'), symlink:\n"
-            "  `mkdir -p ./data && ln -s <cache>/MNIST ./data/mnist`"
+            "  torchvision, HuggingFace, and torch.hub auto-cache here via env vars.\n"
+            "  If a script hardcodes root=R, torchvision expects R/<DatasetName>/raw.\n"
+            "  Before experiments, check the cache: `find <cache> -maxdepth 3 -type d | sort`.\n"
+            "  To reuse cached data, symlink so R/<DatasetName>/raw resolves to the cache:\n"
+            "    e.g. for MNIST with cache at <cache>/MNIST/raw and script root='.data/mnist':\n"
+            "    `mkdir -p .data && ln -s <cache> .data/mnist`\n"
+            "  Verify: `ls .data/mnist/MNIST/raw` should show the cached files."
         )
     return ""
 
