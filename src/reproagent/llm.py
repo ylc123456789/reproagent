@@ -68,6 +68,10 @@ Format:
 
 ### Experiment
 - Probe the script interface (--help, head, grep) before running training.
+- After the experiment finishes, extract metrics from the experiment log files
+  and proceed to finish. If metrics are not in the first portion of a log file,
+  try reading from the end (tail) — training logs often have header material
+  followed by epoch output.
 - If the goal requires a metric that the script does not print, call call_coding_agent
   to add logging. Do NOT skip the metric or assume it works.
 - Prefer bounded/small runs first (few epochs) to validate the pipeline,
