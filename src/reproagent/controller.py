@@ -15,7 +15,7 @@ from pathlib import Path
 from .audit import audit_environment
 from .coding import run_coding_agent_for_patch
 from .context import collect_context
-from .env import ensure_environment, find_conda
+from .env import ensure_environment
 from .integrations.codingagent import configured_codingagent_path
 from .context_policy import ContextPolicy
 from .llm import call_llm
