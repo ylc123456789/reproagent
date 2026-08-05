@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
+import urllib.error
 import urllib.request
 from datetime import datetime
 
@@ -295,14 +297,19 @@ def _format_step_full(step: AgentObservation, policy: ContextPolicy) -> str:
 # ── LLM call ──────────────────────────────────────────────────────
 
 def call_llm(task: ReproTask, system: str, user: str, *, trace_label: str = "") -> str:
-    """Call the LLM with a fresh system+user pair. No chat history."""
+    """Call the LLM with a fresh system+user pair. No chat history.
+
+    Retries transient network errors (timeout, connection reset, 5xx)
+    up to 3 times with exponential back-off.
+    """
     if task.mock_llm:
         return _mock_response(user)
     return _openai_compatible(task, system, user, trace_label=trace_label)
 
 
-def _openai_compatible(task: ReproTask, system: str, user: str, *, trace_label: str = "") -> str:
-    """Call an OpenAI-compatible chat completions API and return the response text."""
+def _openai_compatible(task: ReproTask, system: str, user: str, *,
+                        trace_label: str = "", max_retries: int = 3) -> str:
+    """Call an OpenAI-compatible chat completions API with retries on transient errors."""
     api_key = os.environ.get(task.api_key_env)
     if not api_key:
         raise RuntimeError(f"{task.api_key_env} is not set. Use --mock-llm for local testing.")
@@ -316,18 +323,33 @@ def _openai_compatible(task: ReproTask, system: str, user: str, *, trace_label: 
         "temperature": 0.2,
     }
     url = _chat_completions_url(task.api_base)
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(body).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
+    last_error: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(body).encode("utf-8"),
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            text = data["choices"][0]["message"]["content"].strip()
+            if trace_label:
+                _write_llm_trace(task, trace_label, system, user, text)
+            return text
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError) as exc:
+            last_error = exc
+            status = getattr(exc, "code", 0) if isinstance(exc, urllib.error.HTTPError) else 0
+            # only retry on transient errors: network issues or 5xx
+            if status and status < 500:
+                raise
+            if attempt < max_retries - 1:
+                delay = min(2 ** attempt * 2, 30)
+                time.sleep(delay)
+    raise RuntimeError(
+        f"LLM API call failed after {max_retries} retries: {last_error}"
     )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    text = data["choices"][0]["message"]["content"].strip()
-    if trace_label:
-        _write_llm_trace(task, trace_label, system, user, text)
-    return text
 
 
 def _chat_completions_url(api_base: str) -> str:
