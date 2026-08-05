@@ -17,18 +17,19 @@ from .coding import run_coding_agent_for_patch
 from .context import collect_context
 from .env import ensure_environment, find_conda
 from .integrations.codingagent import configured_codingagent_path
-from .llm import SYSTEM_PROMPT, build_initial_context, build_turn_prompt, call_llm
+from .context_policy import ContextPolicy
+from .llm import call_llm
 from .models import (
     AgentAction,
     AgentObservation,
     AgentState,
     CommandPlan,
-    ContextPolicy,
     EnvironmentInfo,
     RepoContext,
     ReproAgentVersion,
     ReproTask,
 )
+from .prompts import SYSTEM_PROMPT, build_initial_context, build_turn_prompt
 from .report import write_agent_result
 from .runner import run_commands
 
