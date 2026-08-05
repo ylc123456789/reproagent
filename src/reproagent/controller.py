@@ -321,12 +321,19 @@ def run_controller(task: ReproTask) -> AgentState:
         else:
             user_prompt = build_turn_prompt(state, policy)
 
-        raw = call_llm(task, SYSTEM_PROMPT, user_prompt,
-                       trace_label=f"step_{len(state.steps) + 1:02d}")
+        try:
+            raw = call_llm(task, SYSTEM_PROMPT, user_prompt,
+                           trace_label=f"step_{len(state.steps) + 1:02d}")
+        except Exception as exc:
+            _log(f"LLM call failed: {exc}")
+            state.steps.append(AgentObservation(
+                step=len(state.steps) + 1, action="llm_error", stage_hint="error",
+                error=f"LLM API call failed: {exc}",
+            ))
+            continue
 
         action = _parse_action(raw)
         if action is None:
-            # Add a fake step so the next turn's prompt reflects the error
             state.steps.append(AgentObservation(
                 step=len(state.steps) + 1, action="parse_error", stage_hint="error",
                 error="Could not parse JSON action. Return a valid JSON object with an 'action' field.",
