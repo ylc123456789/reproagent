@@ -23,7 +23,12 @@ class LLMClient:
         return json.loads(text)
 
     def complete(self, system: str, user: str, response_format: dict[str, str] | None = None) -> str:
-        """Request a raw chat completion response with retry on transient errors."""
+        """Request a chat completion with retries on transient errors.
+
+        Retries up to 3 times on network errors (URLError, TimeoutError,
+        OSError) and server errors (HTTP 5xx).  4xx errors raise immediately.
+        Back-off: 2s, 4s, 8s (capped at 30s).
+        """
         api_key = os.getenv(self.api_key_env)
         if not api_key:
             raise RuntimeError(f"missing API key environment variable: {self.api_key_env}")
@@ -38,8 +43,8 @@ class LLMClient:
         if response_format is not None:
             payload["response_format"] = response_format
 
-        last_error = None
-        for attempt in range(4):
+        last_error: Exception | None = None
+        for attempt in range(3):
             try:
                 request = urllib.request.Request(
                     f"{self.api_base.rstrip('/')}/chat/completions",
@@ -53,17 +58,17 @@ class LLMClient:
                 with urllib.request.urlopen(request, timeout=120) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                 return data["choices"][0]["message"]["content"]
-            except urllib.error.HTTPError as exc:
-                body = exc.read().decode("utf-8", errors="ignore")
-                last_error = RuntimeError(f"LLM request failed: {exc.code} {body}")
-                if exc.code in (429, 500, 502, 503, 504) and attempt < 3:
-                    time.sleep(2 ** attempt)
-                    continue
-                raise last_error from exc
-            except (OSError, TimeoutError) as exc:
+            except (urllib.error.URLError, OSError, TimeoutError) as exc:
                 last_error = exc
-                if attempt < 3:
-                    time.sleep(2 ** attempt)
+                if attempt < 2:
+                    time.sleep(min(2 ** attempt * 2, 30))
+            except urllib.error.HTTPError as exc:
+                last_error = exc
+                if exc.code >= 500 and attempt < 2:
+                    time.sleep(min(2 ** attempt * 2, 30))
                     continue
-                raise RuntimeError("LLM request failed after retries") from exc
-        raise last_error  # type: ignore[misc]
+                body = exc.read().decode("utf-8", errors="ignore")
+                raise RuntimeError(f"LLM request failed: {exc.code} {body}") from exc
+        raise RuntimeError(
+            f"LLM API call failed after 3 retries: {last_error}"
+        )

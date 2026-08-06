@@ -37,6 +37,14 @@ def run_step_controller(spec: CodeTaskSpec) -> PatchReport:
             break
         try:
             action = choose_next_action(spec, state, context, client)
+        except Exception as llm_exc:
+            state.steps.append(StepRecord(
+                step=step, action=ControllerAction(action="finish", reasoning="LLM call failed."),
+                observation="", error=f"LLM API call failed: {llm_exc}",
+            ))
+            write_state(state, output_dir)
+            continue
+        try:
             action = _normalize_action(spec, state.steps, action)
             (log_dir / f"action_{step:02d}.json").write_text(action.model_dump_json(indent=2), encoding="utf-8")
             record = execute_action(spec, action, output_dir, step, client)
