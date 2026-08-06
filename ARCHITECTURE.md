@@ -34,7 +34,9 @@ src/reproagent/
   __init__.py
   models.py                    # shared Pydantic data structures
   controller.py                # agent loop — the core of reproagent
-  llm.py                       # system prompt, turn prompt builder, LLM API calls
+  prompts.py                   # system prompt + turn prompt builders + helpers
+  context_policy.py            # context budget policy scaled to model window
+  llm.py                       # pure API transport layer (serialise, HTTP, retry)
   runner.py                    # command safety checks, execution, live log streaming
   audit.py                     # post-setup environment audit (torch/tf/jax)
   env.py                       # conda environment creation and command wrapping
