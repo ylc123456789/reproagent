@@ -29,12 +29,12 @@ def build_repo_context(
     tree_limit: int = 500,
 ) -> RepoContext:
     """Build tree, snippet, and initial diff context."""
-    repo = spec.repo_path
+    repo = spec.workspace_path
     tree = _list_tree(repo, tree_limit)
     candidates = _rank_candidate_files(repo, tree, spec.task_goal)
     snippets = [_read_snippet(repo / path, path, max_bytes) for path in candidates[:max_files]]
     initial_diff = _git_diff(repo)
-    return RepoContext(repo_path=repo, tree=tree, snippets=snippets, initial_diff=initial_diff)
+    return RepoContext(workspace_path=repo, tree=tree, snippets=snippets, initial_diff=initial_diff)
 
 
 def _list_tree(repo: Path, limit: int = 500) -> list[str]:

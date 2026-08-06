@@ -61,7 +61,7 @@ def choose_next_action(spec: CodeTaskSpec, state: AgentState, context, client: L
         },
         "repo_tree": context.tree[:policy.repo_tree_limit],
         "snippets": [snippet.model_dump() for snippet in context.snippets[:policy.snippet_count]],
-        "current_diff_tail": current_diff(spec.repo_path)[-policy.diff_chars:],
+        "current_diff_tail": current_diff(spec.workspace_path)[-policy.diff_chars:],
         "remaining_base_steps": max(spec.max_steps - len(state.steps), 0),
         "remaining_hard_steps": max(spec.max_steps + spec.max_extra_steps_after_progress - len(state.steps), 0),
         "progress_hints": _progress_hints(spec, state.steps),

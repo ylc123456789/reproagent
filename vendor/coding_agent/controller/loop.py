@@ -65,7 +65,7 @@ def run_step_controller(spec: CodeTaskSpec) -> PatchReport:
                         f"Auto-ran {len(auto_verification)} verification command(s) before finish.",
                     )
                     verification_results.extend(auto_verification)
-                diff_path = write_diff(current_diff(spec.repo_path), output_dir)
+                diff_path = write_diff(current_diff(spec.workspace_path), output_dir)
                 report = PatchReport(
                     status=_final_status(action.status, changed_files, verification_results),
                     changed_files=changed_files,
@@ -83,7 +83,7 @@ def run_step_controller(spec: CodeTaskSpec) -> PatchReport:
                 report = PatchReport(
                     status="needs_user_input",
                     changed_files=changed_files,
-                    diff_path=write_diff(current_diff(spec.repo_path), output_dir),
+                    diff_path=write_diff(current_diff(spec.workspace_path), output_dir),
                     verification_results=verification_results,
                     summary=action.summary or "Controller needs user input before continuing.",
                     residual_risks=action.residual_risks,
@@ -99,7 +99,7 @@ def run_step_controller(spec: CodeTaskSpec) -> PatchReport:
             write_state(state, output_dir)
             break
 
-    diff_path = write_diff(current_diff(spec.repo_path), output_dir)
+    diff_path = write_diff(current_diff(spec.workspace_path), output_dir)
     if changed_files and verification_results:
         report = review_outcome(spec, changed_files, diff_path, verification_results, [final_error] if final_error else [])
     else:

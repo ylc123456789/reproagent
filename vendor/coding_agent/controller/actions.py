@@ -58,7 +58,7 @@ def _matching_paths_for_text(spec: CodeTaskSpec, needle: str, paths: list[str]) 
     matches = []
     for rel in paths:
         try:
-            path = ensure_path_allowed(spec.repo_path, rel, spec.allowed_paths or None)
+            path = ensure_path_allowed(spec.workspace_path, rel, spec.allowed_paths or None)
         except Exception:
             continue
         if not path.is_file() or Path(rel).suffix.lower() not in TEXT_SUFFIXES:
@@ -74,14 +74,14 @@ def _matching_paths_for_text(spec: CodeTaskSpec, needle: str, paths: list[str]) 
 def _candidate_text_paths(spec: CodeTaskSpec) -> list[str]:
     """List safe text files that may be searched for inference."""
     paths = []
-    for path in sorted(spec.repo_path.rglob("*")):
+    for path in sorted(spec.workspace_path.rglob("*")):
         if not path.is_file():
             continue
-        rel = path.relative_to(spec.repo_path).as_posix()
+        rel = path.relative_to(spec.workspace_path).as_posix()
         if path.suffix.lower() not in TEXT_SUFFIXES:
             continue
         try:
-            ensure_path_allowed(spec.repo_path, rel, spec.allowed_paths or None)
+            ensure_path_allowed(spec.workspace_path, rel, spec.allowed_paths or None)
         except Exception:
             continue
         paths.append(rel)
@@ -102,7 +102,7 @@ def execute_action(spec: CodeTaskSpec, action: ControllerAction, output_dir: Pat
     if action.action == "search":
         if not action.query:
             raise ValueError("search requires query")
-        return StepRecord(step=step, action=action, observation=_search_repo(spec.repo_path, action.query))
+        return StepRecord(step=step, action=action, observation=_search_repo(spec.workspace_path, action.query))
     if action.action in {"replace_text", "insert_before", "insert_after"}:
         changed, observation = _execute_structured_edit_with_repair(spec, action, output_dir, step, client)
         return StepRecord(step=step, action=action, observation=observation, changed_files=changed)
@@ -115,7 +115,7 @@ def execute_action(spec: CodeTaskSpec, action: ControllerAction, output_dir: Pat
         command = action.command or (spec.verify_commands[0] if spec.verify_commands else None)
         if not command:
             raise ValueError("run_command requires command")
-        results = run_verify_commands(spec.repo_path, [command], output_dir / "logs" / f"step_{step:02d}", spec.timeout_seconds)
+        results = run_verify_commands(spec.workspace_path, [command], output_dir / "logs" / f"step_{step:02d}", spec.timeout_seconds)
         result = results[0]
         stdout_tail = result.stdout_path.read_text(encoding="utf-8", errors="ignore")[-4000:]
         stderr_tail = result.stderr_path.read_text(encoding="utf-8", errors="ignore")[-4000:]
@@ -134,13 +134,13 @@ def execute_action(spec: CodeTaskSpec, action: ControllerAction, output_dir: Pat
             raise ValueError("write_file requires path")
         if action.content is None:
             raise ValueError("write_file requires content")
-        file_path = ensure_path_allowed(spec.repo_path, action.path, spec.allowed_paths or None)
+        file_path = ensure_path_allowed(spec.workspace_path, action.path, spec.allowed_paths or None)
         if file_path.exists():
             return StepRecord(step=step, action=action, observation=f"write_file refused: {action.path} already exists. Use replace_text to edit existing files.", error=f"file already exists: {action.path}")
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(action.content, encoding="utf-8")
-        diff_path = write_diff(current_diff(spec.repo_path), output_dir)
-        syntax_note = _check_syntax_after_edit(spec.repo_path, action.path)
+        diff_path = write_diff(current_diff(spec.workspace_path), output_dir)
+        syntax_note = _check_syntax_after_edit(spec.workspace_path, action.path)
         return StepRecord(
             step=step, action=action,
             observation=f"Created {action.path} ({len(action.content)} chars). Current diff written to {diff_path}.{syntax_note}",
@@ -167,7 +167,7 @@ def _run_missing_finish_verification(
     if last_verify_step >= last_change_step:
         return []
     return run_verify_commands(
-        spec.repo_path,
+        spec.workspace_path,
         spec.verify_commands,
         output_dir / "logs" / f"step_{finish_step:02d}_finish_verify",
         spec.timeout_seconds,
@@ -194,7 +194,7 @@ def _read_file_observation(spec: CodeTaskSpec, action: ControllerAction) -> str:
     """Read a file observation using line or size limits."""
     if not action.path:
         raise ValueError("read_file requires path")
-    path = ensure_path_allowed(spec.repo_path, action.path, spec.allowed_paths or None)
+    path = ensure_path_allowed(spec.workspace_path, action.path, spec.allowed_paths or None)
     text = path.read_text(encoding="utf-8", errors="ignore")
     if action.start_line is not None or action.end_line is not None:
         return _slice_lines(text, action.start_line, action.end_line)
@@ -220,7 +220,7 @@ def _match_count_hint(spec, relative_path, needle, action, occurrence_index):
     if not needle or not occurrence_index:
         return ''
     try:
-        path = ensure_path_allowed(spec.repo_path, relative_path, spec.allowed_paths or None)
+        path = ensure_path_allowed(spec.workspace_path, relative_path, spec.allowed_paths or None)
         text = path.read_text(encoding='utf-8', errors='ignore')
         count = len(find_all(text, needle))
         if count > 1:
@@ -266,21 +266,21 @@ def _execute_structured_edit(spec: CodeTaskSpec, action: ControllerAction, outpu
         if action.old_text is None or action.new_text is None:
             raise ValueError("replace_text requires old_text and new_text")
         match_hint = _match_count_hint(spec, action.path, action.old_text, "replace_text", action.occurrence_index)
-        changed = replace_text_once(spec.repo_path, action.path, action.old_text, action.new_text, spec.allowed_paths, action.occurrence_index)
+        changed = replace_text_once(spec.workspace_path, action.path, action.old_text, action.new_text, spec.allowed_paths, action.occurrence_index)
     elif action.action == "insert_before":
         if action.anchor_text is None or action.insert_text is None:
             raise ValueError("insert_before requires anchor_text and insert_text")
         match_hint = _match_count_hint(spec, action.path, action.anchor_text, "insert_before", action.occurrence_index)
-        changed = insert_before_anchor(spec.repo_path, action.path, action.anchor_text, action.insert_text, spec.allowed_paths, action.occurrence_index)
+        changed = insert_before_anchor(spec.workspace_path, action.path, action.anchor_text, action.insert_text, spec.allowed_paths, action.occurrence_index)
     elif action.action == "insert_after":
         if action.anchor_text is None or action.insert_text is None:
             raise ValueError("insert_after requires anchor_text and insert_text")
         match_hint = _match_count_hint(spec, action.path, action.anchor_text, "insert_after", action.occurrence_index)
-        changed = insert_after_anchor(spec.repo_path, action.path, action.anchor_text, action.insert_text, spec.allowed_paths, action.occurrence_index)
+        changed = insert_after_anchor(spec.workspace_path, action.path, action.anchor_text, action.insert_text, spec.allowed_paths, action.occurrence_index)
     else:
         raise ValueError(f"unsupported structured edit: {action.action}")
-    diff_path = write_diff(current_diff(spec.repo_path), output_dir)
-    syntax_note = _check_syntax_after_edit(spec.repo_path, changed)
+    diff_path = write_diff(current_diff(spec.workspace_path), output_dir)
+    syntax_note = _check_syntax_after_edit(spec.workspace_path, changed)
     return [changed], f"Structured edit {action.action}{match_hint} applied to {changed}. Current diff written to {diff_path}.{syntax_note}"
 
 
@@ -299,11 +299,11 @@ def _apply_patch_with_repair(
 
     for attempt in range(1, max_attempts + 1):
         try:
-            changed = apply_patch_text(spec.repo_path, patch, spec.allowed_paths)
-            diff_path = write_diff(current_diff(spec.repo_path), output_dir)
+            changed = apply_patch_text(spec.workspace_path, patch, spec.allowed_paths)
+            diff_path = write_diff(current_diff(spec.workspace_path), output_dir)
             suffix = "" if attempt == 1 else f" after {attempt - 1} repair attempt(s)"
             notes = f" Repair notes: {'; '.join(repair_notes)}" if repair_notes else ""
-            syntax_notes = "".join(_check_syntax_after_edit(spec.repo_path, p) for p in changed)
+            syntax_notes = "".join(_check_syntax_after_edit(spec.workspace_path, p) for p in changed)
             return changed, f"Patch applied{suffix}. Current diff written to {diff_path}.{notes}{syntax_notes}"
         except (PatchApplyError, SafetyError) as exc:
             stderr = getattr(exc, "stderr", "") or str(exc)

@@ -12,7 +12,7 @@ class CodeTaskSpec(BaseModel):
     """Configuration for one coding agent run."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    repo_path: Path
+    workspace_path: Path
     task_goal: str
     constraints: list[str] = Field(default_factory=list)
     verify_commands: list[str] = Field(default_factory=list)
@@ -28,17 +28,14 @@ class CodeTaskSpec(BaseModel):
     api_base: str = "https://api.openai.com/v1"
     api_key_env: str = "OPENAI_API_KEY"
     model: str = "gpt-4.1"
-    output_dir: Path | None = None
+    output_dir: Path
 
-    @field_validator("repo_path")
+    @field_validator("workspace_path")
     @classmethod
-    def repo_path_must_exist(cls, value: Path) -> Path:
-        """Validate that the repository path exists."""
+    def _workspace_path_setup(cls, value: Path) -> Path:
+        """Resolve the workspace path, creating it if it does not exist."""
         resolved = value.expanduser().resolve()
-        if not resolved.exists():
-            raise ValueError(f"repo_path does not exist: {resolved}")
-        if not resolved.is_dir():
-            raise ValueError(f"repo_path is not a directory: {resolved}")
+        resolved.mkdir(parents=True, exist_ok=True)
         return resolved
 
     @field_validator("max_steps")
@@ -99,7 +96,7 @@ class FileSnippet(BaseModel):
 
 class RepoContext(BaseModel):
     """Snapshot of repository tree, snippets, and initial diff."""
-    repo_path: Path
+    workspace_path: Path
     tree: list[str]
     snippets: list[FileSnippet]
     initial_diff: str = ""

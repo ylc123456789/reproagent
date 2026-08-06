@@ -78,7 +78,7 @@ def run_code_task(
     """Run CodingAgent through its Python API."""
     with _codingagent_api(codingagent_path) as api:
         spec = api.CodeTaskSpec(
-            repo_path=repo_path,
+            workspace_path=repo_path,
             task_goal=task_goal,
             constraints=constraints,
             verify_commands=verify_commands,

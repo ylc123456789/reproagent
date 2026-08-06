@@ -9,7 +9,7 @@ from .models import AgentState, CodeTaskSpec, PatchReport
 
 def prepare_output_dir(spec: CodeTaskSpec) -> Path:
     """Create or reuse the run output directory."""
-    output_dir = spec.output_dir or (spec.repo_path / "coding_agent_run")
+    output_dir = spec.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "logs").mkdir(exist_ok=True)
     return output_dir

@@ -82,7 +82,7 @@ def _structured_edit_match_context(spec: CodeTaskSpec, action: ControllerAction)
     if not action.path:
         return {"error": "structured edit has no path"}
     try:
-        path = ensure_path_allowed(spec.repo_path, action.path, spec.allowed_paths or None)
+        path = ensure_path_allowed(spec.workspace_path, action.path, spec.allowed_paths or None)
         text = path.read_text(encoding="utf-8", errors="ignore")
     except Exception as exc:
         return {"path": action.path, "error": str(exc)}
@@ -187,7 +187,7 @@ def repair_patch(
     file_context = []
     for rel in paths[:6]:
         try:
-            path = ensure_path_allowed(spec.repo_path, rel, spec.allowed_paths or None)
+            path = ensure_path_allowed(spec.workspace_path, rel, spec.allowed_paths or None)
             file_context.append({"path": rel, "text": path.read_text(encoding="utf-8", errors="ignore")[:24_000]})
         except Exception as exc:
             file_context.append({"path": rel, "error": str(exc)})
