@@ -30,10 +30,41 @@ ACTION_SCHEMA = {
 }
 
 
+
+
+# Read-only action set for code question answering
+QA_ACTION_SCHEMA = {
+    "action": "list_tree|read_file|search|run_command|finish|ask_user",
+    "reasoning": "brief reason for this next action",
+    "path": "relative file path for read_file, optional",
+    "start_line": "optional 1-based start line for read_file",
+    "end_line": "optional 1-based inclusive end line for read_file",
+    "query": "search query for search, optional",
+    "command": "read-only shell command for run_command (allowed: ls, cat, head, tail, grep, rg, find, wc, file, pwd, tree)",
+    "status": "completed|failed|blocked|needs_user_input for finish/ask_user",
+    "summary": "final answer or user-facing summary; use markdown",
+    "residual_risks": ["risk strings for finish/ask_user"],
+}
+
+QA_SYSTEM = (
+    "You are a code understanding agent. Answer questions about the repository "
+    "by reading files (prefer read_file over grep to get exact code context) "
+    "and running read-only shell commands (grep, find, ls, cat, etc.). "
+    "Always read_file before citing line numbers to confirm accuracy. "
+    "Your answer MUST include: (1) file paths and line numbers for every claim, "
+    "(2) relevant code snippets copied from the files, "
+    "(3) explicit uncertainty statements where applicable. "
+    "You CANNOT modify any files — write actions are disabled. "
+    "Use finish with status=completed (or failed if you cannot answer), "
+    "and a well-structured markdown answer in the summary field. "
+    "Return only JSON matching the schema."
+)
+
 def choose_next_action(spec: CodeTaskSpec, state: AgentState, context, client: LLMClient) -> ControllerAction:
     """Ask the model to choose the next controller action."""
     policy = resolve_context_policy(spec)
-    system = (
+    is_qa = getattr(spec, "read_only", False)
+    system = QA_SYSTEM if is_qa else (
         "You are a coding agent controller inspired by modern agentic coding tools. "
         "Choose exactly one next action from the allowed action set. "
         "After reading a file, prefer structured edit actions (replace_text, insert_before, insert_after) for small local edits. "
@@ -67,7 +98,7 @@ def choose_next_action(spec: CodeTaskSpec, state: AgentState, context, client: L
         "progress_hints": _progress_hints(spec, state.steps),
         "recent_file_observations": _recent_file_observations(state.steps, policy),
         "steps": [_compact_step(step, policy) for step in state.steps[-10:]],
-        "available_actions": ACTION_SCHEMA,
+        "available_actions": QA_ACTION_SCHEMA if getattr(spec, "read_only", False) else ACTION_SCHEMA,
     }
     return ControllerAction.model_validate(client.complete_json(system, json.dumps(user, indent=2)))
 

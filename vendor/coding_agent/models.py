@@ -28,6 +28,7 @@ class CodeTaskSpec(BaseModel):
     api_base: str = "https://api.openai.com/v1"
     api_key_env: str = "OPENAI_API_KEY"
     model: str = "gpt-4.1"
+    read_only: bool = False
     output_dir: Path
 
     @field_validator("workspace_path")
@@ -85,6 +86,55 @@ class CodeTaskSpec(BaseModel):
         if value < 0:
             raise ValueError("patch_repair_attempts must be >= 0")
         return value
+
+
+
+
+class CodeQuestionSpec(BaseModel):
+    """Specification for a read-only code understanding question."""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    workspace_path: Path
+    question: str
+    output_dir: Path
+    context_hint: str = ""
+    constraints: list[str] = Field(default_factory=list)
+    max_steps: int = 12
+    timeout_seconds: int = 600
+    model: str = "gpt-4.1"
+    api_base: str = "https://api.openai.com/v1"
+    api_key_env: str = "OPENAI_API_KEY"
+    max_context_tokens: int | None = None
+    model_context_window_tokens: int | None = None
+    context_margin_ratio: float = 0.20
+    context_output_reserve_tokens: int = 16_384
+
+    @field_validator("workspace_path")
+    @classmethod
+    def _workspace_must_exist(cls, value: Path) -> Path:
+        resolved = value.expanduser().resolve()
+        if not resolved.exists():
+            raise ValueError(f"workspace_path does not exist: {resolved}")
+        return resolved
+
+
+class Snippet(BaseModel):
+    """Code snippet with location and relevance explanation."""
+    path: str
+    start_line: int
+    end_line: int
+    content: str
+    why: str = ""
+
+
+class CodeExplanation(BaseModel):
+    """Result of a code question: answer with evidence."""
+    status: Literal["completed", "failed", "blocked", "needs_user_input"]
+    answer: str
+    evidence_files: list[str] = Field(default_factory=list)
+    relevant_snippets: list[Snippet] = Field(default_factory=list)
+    uncertainty: str = ""
+    commands_run: list[CommandResult] = Field(default_factory=list)
 
 
 class FileSnippet(BaseModel):

@@ -69,6 +69,30 @@ def ensure_path_allowed(repo_root: Path, relative_path: str, allowed_paths: list
     return resolved
 
 
+
+
+READ_ONLY_COMMAND_PREFIXES = (
+    "ls", "cat", "head", "tail", "grep", "rg", "find", "wc", "file", "pwd", "tree",
+)
+
+
+def validate_read_only_command(command: str) -> None:
+    """Reject commands not in the read-only whitelist."""
+    validate_command(command)
+    try:
+        tokens = shlex.split(command)
+    except ValueError as exc:
+        raise SafetyError(f"invalid shell command: {command}") from exc
+    if not tokens:
+        raise SafetyError("empty command")
+    base = tokens[0].split("/")[-1]
+    if base not in READ_ONLY_COMMAND_PREFIXES:
+        raise SafetyError(
+            f"command not allowed in read-only mode: {base}. "
+            f"Allowed: {', '.join(READ_ONLY_COMMAND_PREFIXES)}"
+        )
+
+
 def validate_command(command: str) -> None:
     """Reject dangerous shell commands."""
     lowered = command.lower()

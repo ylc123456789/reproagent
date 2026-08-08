@@ -90,6 +90,14 @@ def _candidate_text_paths(spec: CodeTaskSpec) -> list[str]:
 
 def execute_action(spec: CodeTaskSpec, action: ControllerAction, output_dir: Path, step: int, client: LLMClient) -> StepRecord:
     """Execute one normalized controller action."""
+    if getattr(spec, "read_only", False) and action.action in {
+        "replace_text", "insert_before", "insert_after", "apply_patch", "write_file",
+    }:
+        return StepRecord(
+            step=step, action=action,
+            observation=f"Action {action.action} is not allowed in read-only mode.",
+            error=f"write action rejected in read-only mode",
+        )
     if action.action == "list_tree":
         policy = resolve_context_policy(spec)
         context = build_repo_context(spec, max_files=policy.snippet_count, max_bytes=policy.snippet_chars, tree_limit=policy.repo_tree_limit)
@@ -115,6 +123,12 @@ def execute_action(spec: CodeTaskSpec, action: ControllerAction, output_dir: Pat
         command = action.command or (spec.verify_commands[0] if spec.verify_commands else None)
         if not command:
             raise ValueError("run_command requires command")
+        if getattr(spec, "read_only", False):
+            from ..safety import validate_read_only_command
+            try:
+                validate_read_only_command(command)
+            except Exception as exc:
+                return StepRecord(step=step, action=action, observation=str(exc), error=str(exc))
         results = run_verify_commands(spec.workspace_path, [command], output_dir / "logs" / f"step_{step:02d}", spec.timeout_seconds)
         result = results[0]
         stdout_tail = result.stdout_path.read_text(encoding="utf-8", errors="ignore")[-4000:]

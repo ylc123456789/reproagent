@@ -53,7 +53,7 @@ def run_step_controller(spec: CodeTaskSpec) -> PatchReport:
             verification_results.extend(record.verification_results)
             write_state(state, output_dir)
 
-            if action.action in {"replace_text", "insert_before", "insert_after", "apply_patch", "write_file", "run_command"}:
+            if not getattr(spec, "read_only", False) and action.action in {"replace_text", "insert_before", "insert_after", "apply_patch", "write_file", "run_command"}:
                 context = _build_context(spec, policy)
 
             if action.action == "finish":
