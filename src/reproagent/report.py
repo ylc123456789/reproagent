@@ -199,6 +199,11 @@ def write_agent_result(state: AgentState, version: ReproAgentVersion | None = No
 
     path.write_text(_clean_text("\n".join(lines)), encoding="utf-8")
     _save_agent_state(state)
+    state.produced_files["result"] = path
+    state.produced_files["state"] = state.task.workspace_dir / "state.json"
+    logs_dir = state.task.workspace_dir / "logs"
+    if logs_dir.is_dir():
+        state.produced_files["logs"] = logs_dir
     return path
 
 

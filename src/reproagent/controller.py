@@ -8,6 +8,7 @@ until the LLM calls finish or the step budget is exhausted.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -286,9 +287,9 @@ def run_controller(task: ReproTask) -> AgentState:
     version = _current_reproagent_version()
     _log(f"workspace: {task.workspace_dir}")
     _log(_format_version(version))
+    _prev_cache = os.environ.get("REPROAGENT_DATASET_CACHE")
     if task.dataset_cache_dir:
-        import os as _os
-        _os.environ["REPROAGENT_DATASET_CACHE"] = task.dataset_cache_dir
+        os.environ["REPROAGENT_DATASET_CACHE"] = task.dataset_cache_dir
 
     # ── init ──────────────────────────────────────────────────
     if task.mock_llm:
@@ -376,6 +377,11 @@ def run_controller(task: ReproTask) -> AgentState:
     result_path = write_agent_result(state, version)
     state.result_path = result_path
     _log(f"result: {result_path}")
+    # restore env var that was overridden for this task
+    if _prev_cache is None:
+        os.environ.pop("REPROAGENT_DATASET_CACHE", None)
+    else:
+        os.environ["REPROAGENT_DATASET_CACHE"] = _prev_cache
     return state
 
 

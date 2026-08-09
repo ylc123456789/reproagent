@@ -149,6 +149,7 @@ class AgentState(BaseModel):
     final_summary: str = ""
     result_path: Path | None = None
     file_cache: dict[str, str] = Field(default_factory=dict)
+    produced_files: dict[str, Path] = Field(default_factory=dict)
 
     # compatibility aliases for infrastructure modules
     @property
