@@ -76,8 +76,6 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
     print(f"[reproagent] running {stage} command {attempt}.{index}: {command}", flush=True)
     print(f"[reproagent] logs: stdout={stdout_path}, stderr={stderr_path}", flush=True)
     start = time.monotonic()
-    stdout_chunks: list[str] = []
-    stderr_chunks: list[str] = []
     stdout_path.write_text("", encoding="utf-8")
     stderr_path.write_text("", encoding="utf-8")
     code = -1
@@ -94,8 +92,8 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
         )
         with stdout_path.open("a", encoding="utf-8", errors="replace") as stdout_file, stderr_path.open("a", encoding="utf-8", errors="replace") as stderr_file:
             threads = [
-                threading.Thread(target=_stream_pipe, args=(process.stdout, sys.stdout, stdout_file, stdout_chunks, stage), daemon=True),
-                threading.Thread(target=_stream_pipe, args=(process.stderr, sys.stderr, stderr_file, stderr_chunks, stage), daemon=True),
+                threading.Thread(target=_stream_pipe, args=(process.stdout, sys.stdout, stdout_file, stage), daemon=True),
+                threading.Thread(target=_stream_pipe, args=(process.stderr, sys.stderr, stderr_file, stage), daemon=True),
             ]
             for thread in threads:
                 thread.start()
@@ -112,7 +110,6 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
                 if stream is not None:
                     stream.close()
         message = f"Command timed out after {timeout}s\n"
-        stderr_chunks.append(message)
         with stderr_path.open("a", encoding="utf-8", errors="replace") as stderr_file:
             stderr_file.write(message)
             stderr_file.flush()
@@ -147,7 +144,7 @@ def _wait_for_process(process: subprocess.Popen[str], timeout: int, stage: str, 
                 next_heartbeat = now + COMMAND_HEARTBEAT_SECONDS
 
 
-def _stream_pipe(pipe, display, log_file, chunks: list[str], stage: str) -> None:
+def _stream_pipe(pipe, display, log_file, stage: str) -> None:
     """Stream subprocess output to a log file."""
     if pipe is None:
         return
@@ -157,7 +154,6 @@ def _stream_pipe(pipe, display, log_file, chunks: list[str], stage: str) -> None
             char = pipe.read(1)
             if char == "":
                 break
-            chunks.append(char)
             try:
                 log_file.write(char)
                 log_file.flush()

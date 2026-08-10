@@ -103,14 +103,12 @@ def test_stream_pipe_displays_carriage_return_experiment_progress():
     pipe = NonClosingStringIO(" 42%|####      | 1/2 [00:01<00:01]\rEpoch 1 | loss 0.5 | Test Acc 0.9\n")
     display = io.StringIO()
     log_file = io.StringIO()
-    chunks = []
 
-    runner._stream_pipe(pipe, display, log_file, chunks, "experiment")
+    runner._stream_pipe(pipe, display, log_file, "experiment")
 
     assert "42%" in display.getvalue()
     assert "Epoch 1" in display.getvalue()
     assert log_file.getvalue() == " 42%|####      | 1/2 [00:01<00:01]\rEpoch 1 | loss 0.5 | Test Acc 0.9\n"
-    assert "".join(chunks) == log_file.getvalue()
 
 
 def test_run_one_suppresses_environment_and_probe_raw_output(tmp_path, monkeypatch, capsys):
