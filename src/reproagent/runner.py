@@ -180,11 +180,38 @@ def _should_display_line(stage: str, line: str) -> bool:
     return stage == "experiment"
 
 
+def _pip_cache_dir(workspace: Path, env: dict[str, str]) -> Path:
+    """Resolve the pip cache directory.
+
+    Priority:
+      1. REPROAGENT_PIP_CACHE (explicit)
+      2. sibling of REPROAGENT_DATASET_CACHE (e.g. /root/autodl-tmp/datasets
+         -> /root/autodl-tmp/pip-cache) — zero-config on machines that
+         already have the dataset cache set
+      3. per-workspace fallback (previous behaviour)
+
+    A shared cache means large wheels (torch ~500MB+) are downloaded at most
+    once per mirror source, instead of once per workspace.
+    """
+    explicit = env.get("REPROAGENT_PIP_CACHE", "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+    dataset_cache = env.get("REPROAGENT_DATASET_CACHE", "").strip()
+    if dataset_cache:
+        return Path(dataset_cache).expanduser().parent / "pip-cache"
+    return workspace / ".cache" / "pip"
+
+
 def _command_env(workspace: Path) -> dict[str, str]:
     """Build the subprocess environment for a command."""
     env = os.environ.copy()
-    pip_cache_dir = workspace / ".cache" / "pip"
-    pip_cache_dir.mkdir(parents=True, exist_ok=True)
+    pip_cache_dir = _pip_cache_dir(workspace, env)
+    try:
+        pip_cache_dir.mkdir(parents=True, exist_ok=True)
+    except (OSError, PermissionError):
+        # shared location not writable — fall back to per-workspace cache
+        pip_cache_dir = workspace / ".cache" / "pip"
+        pip_cache_dir.mkdir(parents=True, exist_ok=True)
     env["PIP_CACHE_DIR"] = str(pip_cache_dir)
     env.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
     env.setdefault("PYTHONUNBUFFERED", "1")

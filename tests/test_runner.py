@@ -59,6 +59,8 @@ def test_command_env_sets_workspace_cache_and_valid_omp(tmp_path, monkeypatch):
     from reproagent.runner import _command_env
 
     monkeypatch.setenv("OMP_NUM_THREADS", "not-a-number")
+    monkeypatch.delenv("REPROAGENT_PIP_CACHE", raising=False)
+    monkeypatch.delenv("REPROAGENT_DATASET_CACHE", raising=False)
 
     env = _command_env(tmp_path)
 
@@ -66,6 +68,38 @@ def test_command_env_sets_workspace_cache_and_valid_omp(tmp_path, monkeypatch):
     assert env["OMP_NUM_THREADS"] == "16"
     assert env["PYTHONUNBUFFERED"] == "1"
     assert (tmp_path / ".cache" / "pip").is_dir()
+
+
+def test_pip_cache_explicit_env_wins(tmp_path, monkeypatch):
+    from reproagent.runner import _command_env
+
+    shared = tmp_path / "shared_pip"
+    monkeypatch.setenv("REPROAGENT_PIP_CACHE", str(shared))
+    monkeypatch.setenv("REPROAGENT_DATASET_CACHE", str(tmp_path / "ds"))
+
+    env = _command_env(tmp_path / "ws")
+    assert env["PIP_CACHE_DIR"] == str(shared)
+    assert shared.is_dir()
+
+
+def test_pip_cache_derives_sibling_of_dataset_cache(tmp_path, monkeypatch):
+    """Zero-config case: dataset cache set -> pip cache lands next to it."""
+    from reproagent.runner import _command_env
+
+    monkeypatch.delenv("REPROAGENT_PIP_CACHE", raising=False)
+    monkeypatch.setenv("REPROAGENT_DATASET_CACHE", str(tmp_path / "autodl-tmp" / "datasets"))
+
+    env = _command_env(tmp_path / "ws")
+    assert env["PIP_CACHE_DIR"] == str(tmp_path / "autodl-tmp" / "pip-cache")
+    assert (tmp_path / "autodl-tmp" / "pip-cache").is_dir()
+
+
+def test_pip_cache_falls_back_when_shared_unwritable(tmp_path, monkeypatch):
+    from reproagent.runner import _command_env
+
+    monkeypatch.setenv("REPROAGENT_PIP_CACHE", "/proc/definitely-not-writable/pip")
+    env = _command_env(tmp_path / "ws")
+    assert env["PIP_CACHE_DIR"] == str((tmp_path / "ws") / ".cache" / "pip")
 
 
 def test_run_one_writes_full_logs_and_streams_all_experiment_output(tmp_path, monkeypatch, capsys):

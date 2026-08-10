@@ -38,6 +38,8 @@ src/reproagent/
   context_policy.py            # context budget policy scaled to model window
   llm.py                       # pure API transport layer (serialise, HTTP, retry)
   runner.py                    # command safety checks, execution, live log streaming
+                               # pip cache layering: REPROAGENT_PIP_CACHE >
+                               # sibling of dataset cache > per-workspace
   audit.py                     # post-setup environment audit (torch/tf/jax)
   env.py                       # conda environment creation and command wrapping
   context.py                   # clone repo and collect README/file-tree/hardware
