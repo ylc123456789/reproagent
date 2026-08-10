@@ -41,6 +41,8 @@ src/reproagent/
   audit.py                     # post-setup environment audit (torch/tf/jax)
   env.py                       # conda environment creation and command wrapping
   context.py                   # clone repo and collect README/file-tree/hardware
+  dataset_cache.py             # scan hardcoded dataset roots, resolve to absolute
+                               # paths, pre-create symlinks into the shared cache
   coding.py                    # CodingAgent patch orchestration
   hardware.py                  # lightweight hardware context collection
   text.py                      # text normalization for LLM output and reports

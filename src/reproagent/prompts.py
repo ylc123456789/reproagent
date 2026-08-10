@@ -87,17 +87,21 @@ Format:
 # ── context builders ─────────────────────────────────────────────
 
 def build_initial_context(task: ReproTask, repo_context: RepoContext, environment: EnvironmentInfo,
-                           policy: ContextPolicy | None = None) -> str:
+                          policy: ContextPolicy | None = None,
+                          dataset_links: list[dict] | None = None) -> str:
     """Build the very first user message — only called once at the start."""
+    from .dataset_cache import render_dataset_block
     env_text = _env_line(environment)
     readme_limit = policy.readme_chars if policy else 16000
+    dataset_block = render_dataset_block(task, repo_context.repo_path, dataset_links or [])
     return f"""## Task
 
 Paper: {task.paper_url}
 Repo: {task.repo_url} (cloned at {repo_context.repo_path}, commit {repo_context.commit_hash or 'unknown'})
 Experiment goal: {task.experiment_goal}
 Timeout: {task.timeout_seconds}s per command batch
-Max steps: {task.max_steps}{_cache_line(task)}
+Max steps: {task.max_steps}
+{dataset_block}
 
 ## Environment
 
@@ -135,10 +139,21 @@ def build_turn_prompt(state: AgentState, policy: ContextPolicy) -> str:
     parts.append(f"Goal: {state.task.experiment_goal}")
     parts.append(f"Paper: {state.task.paper_url}")
     parts.append(f"Repo: {state.task.repo_url}")
+    if state.repo_context is not None:
+        parts.append(
+            f"Commands run with cwd = {state.repo_context.repo_path} (absolute). "
+            "Relative paths in scripts resolve against this directory, "
+            "not the script's own location."
+        )
     remaining = state.task.max_steps - len(state.steps)
     parts.append(f"Timeout: {state.task.timeout_seconds}s | Steps used: {len(state.steps)}/{state.task.max_steps} (max)")
-    if state.task.dataset_cache_dir:
-        parts.append(_cache_line(state.task))
+
+    # --- dataset cache (absolute-path mapping, system-resolved) ---
+    from .dataset_cache import render_dataset_block
+    repo_path = state.repo_context.repo_path if state.repo_context else None
+    dataset_block = render_dataset_block(state.task, repo_path, state.dataset_links)
+    if dataset_block:
+        parts.append(dataset_block)
     if remaining <= 4:
         parts.append(f"Only {remaining} step(s) remain. Prioritize finishing.")
 
@@ -183,17 +198,9 @@ def _env_line(env: EnvironmentInfo) -> str:
 
 
 def _cache_line(task: ReproTask) -> str:
+    """Deprecated: superseded by dataset_cache.render_dataset_block."""
     if task.dataset_cache_dir:
-        return (
-            f"\nDataset cache: {task.dataset_cache_dir}\n"
-            "  torchvision, HuggingFace, and torch.hub auto-cache here via env vars.\n"
-            "  If a script hardcodes root=R, torchvision expects R/<DatasetName>/raw.\n"
-            "  Before experiments, check the cache: `find <cache> -maxdepth 3 -type d | sort`.\n"
-            "  To reuse cached data, symlink so R/<DatasetName>/raw resolves to the cache:\n"
-            "    e.g. for MNIST with cache at <cache>/MNIST/raw and script root='.data/mnist':\n"
-            "    `mkdir -p .data && ln -s <cache> .data/mnist`\n"
-            "  Verify: `ls .data/mnist/MNIST/raw` should show the cached files."
-        )
+        return f"\nDataset cache: {task.dataset_cache_dir}\n"
     return ""
 
 

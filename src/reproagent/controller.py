@@ -313,13 +313,32 @@ def run_controller(task: ReproTask) -> AgentState:
         repo_context=repo_context,
         environment=environment,
     )
+
+    # Bridge hardcoded dataset roots to the shared cache BEFORE the loop:
+    # the LLM cannot do this itself (runner blocks ../ in commands) and
+    # relative-path reasoning is where it fails. Best-effort, never fatal.
+    if task.dataset_cache_dir:
+        try:
+            from .dataset_cache import prepare_dataset_links
+            state.dataset_links = prepare_dataset_links(
+                repo_path=repo_context.repo_path,
+                workspace_dir=task.workspace_dir,
+                cache_root=task.dataset_cache_dir,
+            )
+            created = sum(1 for r in state.dataset_links if r.get("link") == "created")
+            _log(f"dataset cache: {len(state.dataset_links)} root(s) detected, "
+                 f"{created} symlink(s) pre-created")
+        except Exception as exc:
+            _log(f"dataset cache preparation skipped: {exc}")
+
     policy = ContextPolicy.for_model(task.model)
 
     # ── loop ──────────────────────────────────────────────────
     for _step in range(task.max_steps):
         # build prompt fresh from current state
         if len(state.steps) == 0:
-            user_prompt = build_initial_context(task, repo_context, environment, policy)
+            user_prompt = build_initial_context(task, repo_context, environment, policy,
+                                                dataset_links=state.dataset_links)
         else:
             user_prompt = build_turn_prompt(state, policy)
 
