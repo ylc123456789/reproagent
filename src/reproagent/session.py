@@ -29,7 +29,15 @@ def write_session_card(state: AgentState, *, created_at: str | None = None, **ex
 
     now = _utcnow()
     if created_at is None:
-        created_at = now
+        # Try to preserve original created_at from an existing card
+        if path.exists():
+            try:
+                existing = _read_yaml(path)
+                created_at = existing.get("created_at", now)
+            except Exception:
+                created_at = now
+        else:
+            created_at = now
 
     bindings = {"conda_env": state.environment.env_name if state.environment else ""}
     if state.task.dataset_cache_dir:

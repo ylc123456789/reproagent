@@ -297,7 +297,6 @@ def run_controller(task: ReproTask, *, resume_state: AgentState | None = None) -
         os.environ["REPROAGENT_DATASET_CACHE"] = task.dataset_cache_dir
 
     # ── init or resume ──────────────────────────────────────
-    _created_at: str | None = None
     if resume_state is not None:
         state = resume_state
         state.task = task
@@ -409,7 +408,7 @@ def run_controller(task: ReproTask, *, resume_state: AgentState | None = None) -
     state.result_path = result_path
     _log(f"result: {result_path}")
     try:
-        card_path = write_session_card(state, created_at=_created_at)
+        card_path = write_session_card(state)
         _log(f"session card: {card_path}")
     except Exception as exc:
         _log(f"session card skipped: {exc}")
