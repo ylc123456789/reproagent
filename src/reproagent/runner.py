@@ -57,6 +57,12 @@ def run_commands(commands: list[str], cwd: Path, workspace: Path, stage: str, at
     """Run a list of commands and collect their results."""
     results: list[CommandResult] = []
     for index, command in enumerate(commands, start=1):
+        if command.strip() in _INTERNAL_ACTIONS:
+            results.append(_write_blocked_result(
+                command, workspace, stage, attempt, index,
+                f"'{command}' is an agent action, not a shell command. Use the '{command}' tool instead.",
+            ))
+            continue
         ok, reason = is_safe_command(command, stage=stage)
         if not ok:
             results.append(_write_blocked_result(command, workspace, stage, attempt, index, reason or "blocked"))

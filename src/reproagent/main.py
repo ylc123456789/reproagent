@@ -159,6 +159,7 @@ def _cmd_resume(args) -> None:
     )
     from .models import AgentState
     old_state = AgentState.model_validate(state_data)
+    old_state.attempt_count = getattr(old_state, "attempt_count", 1) + 1
     state = run_controller(task, resume_state=old_state)
     print(f"status: {state.status}")
     print(f"result: {state.result_path}")

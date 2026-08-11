@@ -154,6 +154,7 @@ class AgentState(BaseModel):
     result_path: Path | None = None
     file_cache: dict[str, str] = Field(default_factory=dict)
     produced_files: dict[str, Path] = Field(default_factory=dict)
+    attempt_count: int = 1
     # Dataset-cache bridging: resolved hardcoded dataset roots + symlink status
     # (see dataset_cache.py). Rendered into every turn prompt.
     dataset_links: list[dict] = Field(default_factory=list)

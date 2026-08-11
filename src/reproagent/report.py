@@ -125,9 +125,11 @@ def write_agent_result(state: AgentState, version: ReproAgentVersion | None = No
     path = state.task.workspace_dir / "result.md"
     state.result_path = path
 
+    attempt_label = f" (retry/resume)" if state.attempt_count > 1 else ""
     lines = [
         "# Reproduction Result", "",
         f"Task ID: `{state.task.task_id}`",
+        f"Attempt: {state.attempt_count}{attempt_label}",
         f"Status: `{state.status}`", "",
         "## Inputs", "",
         f"- Paper: {state.task.paper_url}",
@@ -139,6 +141,11 @@ def write_agent_result(state: AgentState, version: ReproAgentVersion | None = No
         f"- Max steps: {state.task.max_steps}",
         "",
     ]
+
+    # Recovered warnings: failed commands that were later retried/resolved
+    recovered = _recovered_warnings(state)
+    if recovered:
+        lines += ["## Recovered Warnings", ""] + [f"- {w}" for w in recovered] + [""]
 
     if version:
         lines += [
@@ -205,6 +212,24 @@ def write_agent_result(state: AgentState, version: ReproAgentVersion | None = No
     if logs_dir.is_dir():
         state.produced_files["logs"] = logs_dir
     return path
+
+
+def _recovered_warnings(state: AgentState) -> list[str]:
+    """Scan steps for failed commands that were resolved by later recovery."""
+    warnings: list[str] = []
+    for step in state.steps:
+        for cr in step.command_results:
+            if cr.exit_code not in (0, -2):  # -2 is safety-blocked, expected
+                warnings.append(
+                    f"Step {step.step}: `{cr.command[:80]}` (exit={cr.exit_code}) — "
+                    f"recovered by subsequent step"
+                )
+    for step in state.steps:
+        if step.error and "parse_error" in step.action:
+            warnings.append(f"Step {step.step}: parse_error — LLM response was not valid JSON, retried")
+        if step.error and "llm_error" in step.action:
+            warnings.append(f"Step {step.step}: llm_error — API call failed, retried")
+    return warnings[:20]
 
 
 def _save_agent_state(state: AgentState):
