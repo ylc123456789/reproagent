@@ -80,6 +80,7 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
     stderr_path.write_text("", encoding="utf-8")
     code = -1
     process: subprocess.Popen[str] | None = None
+    threads: list[threading.Thread] = []
     try:
         process = subprocess.Popen(
             backend_command,
@@ -98,14 +99,21 @@ def _run_one(command: str, cwd: Path, workspace: Path, stage: str, attempt: int,
             for thread in threads:
                 thread.start()
             code = _wait_for_process(process, timeout, stage, attempt, index, stdout_path, stderr_path)
+            # Drain BEFORE closing: after process exit the pipes hit EOF and
+            # the stream threads finish on their own. Closing the streams
+            # first races with _stream_pipe's reads and silently drops the
+            # buffered tail of the output ("I/O operation on closed file").
+            for thread in threads:
+                thread.join(timeout=5)
             for stream in (process.stdout, process.stderr):
                 if stream is not None and not stream.closed:
                     stream.close()
-            for thread in threads:
-                thread.join()
     except subprocess.TimeoutExpired:
         if process is not None:
             process.kill()
+        for thread in threads:
+            thread.join(timeout=5)
+        if process is not None:
             for stream in (process.stdout, process.stderr):
                 if stream is not None:
                     stream.close()
@@ -151,7 +159,10 @@ def _stream_pipe(pipe, display, log_file, stage: str) -> None:
     pending: list[str] = []
     try:
         while True:
-            char = pipe.read(1)
+            try:
+                char = pipe.read(1)
+            except (ValueError, OSError):
+                break  # pipe closed concurrently
             if char == "":
                 break
             try:

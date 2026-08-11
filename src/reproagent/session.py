@@ -70,11 +70,10 @@ def write_session_card(state: AgentState, *, created_at: str | None = None, **ex
     }
     if state.task.parent_run:
         card["parent"] = state.task.parent_run
-    if state.result_path:
-        try:
-            card["project_path"] = str(ws.resolve())
-        except Exception:
-            card["project_path"] = str(ws)
+    try:
+        card["project_path"] = str(ws.resolve())
+    except Exception:
+        card["project_path"] = str(ws)
 
     _write_yaml(path, card)
     return path
@@ -186,7 +185,11 @@ def _yaml_value(value) -> str:
         return "true" if value else "false"
     if value is None:
         return ""
-    s = str(value)
+    # Fold all whitespace (incl. newlines) into single spaces: card fields are
+    # display text, and keeping one line per field keeps both this minimal
+    # reader and strict YAML parsers happy (multi-line values previously got
+    # truncated on read-back and could inject spurious keys).
+    s = " ".join(str(value).split())
     if ":" in s or "#" in s or s.startswith(" ") or s.endswith(" "):
         s = s.replace('"', '\\"')
         return f'"{s}"'
