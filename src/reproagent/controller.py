@@ -39,6 +39,7 @@ from .runner import run_commands
 # ── helpers ───────────────────────────────────────────────────────
 
 def _log(message: str) -> None:
+    """Print a prefixed workflow log message."""
     print(f"[reproagent] {message}", flush=True)
 
 
@@ -55,6 +56,7 @@ def _confirm_experiment(commands: list[str]) -> bool:
 
 
 def _current_reproagent_version() -> ReproAgentVersion:
+    """Collect git metadata for the running reproagent checkout."""
     source_path = Path(__file__).resolve().parents[2]
     return ReproAgentVersion(
         source_path=source_path,

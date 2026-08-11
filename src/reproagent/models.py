@@ -99,6 +99,7 @@ class CommandResult(BaseModel):
 
     @property
     def success(self) -> bool:
+        """Return True if the command exited with code 0."""
         return self.exit_code == 0
 
 
@@ -160,14 +161,17 @@ class AgentState(BaseModel):
     # compatibility aliases for infrastructure modules
     @property
     def environment_audit(self):
+        """Compatibility alias for infrastructure modules."""
         return self.last_audit
 
     @property
     def coding_agent_results(self):
+        """Compatibility alias for infrastructure modules."""
         return self.coding_results
 
     @property
     def probe_attempts(self) -> list:
+        """Compatibility alias: always empty for agent-loop state."""
         return []
 
 
@@ -194,6 +198,7 @@ class StageResult(BaseModel):
 
     @property
     def success(self) -> bool:
+        """Return True if all commands in this stage succeeded."""
         return bool(self.results) and all(r.success for r in self.results)
 
 
