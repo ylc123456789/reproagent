@@ -41,6 +41,9 @@ class ReproTask(BaseModel):
     mirror_strict: bool = False
     confirm_before_experiment: bool = False
     dataset_cache_dir: str = ""
+    parent_run: dict | None = None
+    env_namespace: str = ""
+    isolate_env: bool = False
 
 
 class RepoContext(BaseModel):

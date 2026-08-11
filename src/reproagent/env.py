@@ -23,7 +23,7 @@ def ensure_environment(state: ReproState) -> EnvironmentInfo:
     if conda is None:
         raise RuntimeError("conda was not found. Set REPROAGENT_CONDA_EXE or install Miniconda/Anaconda so conda is on PATH.")
 
-    env_name = _env_name(state.task.task_id)
+    env_name = _env_name(state.task.task_id, namespace=state.task.env_namespace, isolate=state.task.isolate_env)
     logs = state.task.workspace_dir / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     stdout_path = logs / "conda_setup.stdout"
@@ -141,8 +141,17 @@ def find_conda() -> str | None:
     return None
 
 
-def _env_name(task_id: str) -> str:
-    """Create a unique conda environment name."""
+def _env_name(task_id: str, namespace: str = "", isolate: bool = False) -> str:
+    """Create a unique conda environment name.
+
+    When namespace is provided (e.g. a ResAgent run_id), the env is shared
+    across tasks within that project: ``resenv_<sanitized_namespace>``.
+    When isolate_env is True, falls back to per-task naming even with a
+    namespace.
+    """
+    if not isolate and namespace:
+        safe = re.sub(r"[^A-Za-z0-9_]+", "_", namespace)
+        return f"resenv_{safe}"[:80]
     safe = re.sub(r"[^A-Za-z0-9_]+", "_", task_id)
     return f"repro_{safe}"[:80]
 

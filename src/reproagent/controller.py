@@ -32,6 +32,7 @@ from .models import (
 )
 from .prompts import SYSTEM_PROMPT, build_initial_context, build_turn_prompt
 from .report import write_agent_result
+from .session import write_session_card
 from .runner import run_commands
 
 
@@ -396,6 +397,11 @@ def run_controller(task: ReproTask) -> AgentState:
     result_path = write_agent_result(state, version)
     state.result_path = result_path
     _log(f"result: {result_path}")
+    try:
+        card_path = write_session_card(state)
+        _log(f"session card: {card_path}")
+    except Exception as exc:
+        _log(f"session card skipped: {exc}")
     # restore env var that was overridden for this task
     if _prev_cache is None:
         os.environ.pop("REPROAGENT_DATASET_CACHE", None)
