@@ -157,7 +157,9 @@ def _cmd_resume(args) -> None:
         isolate_env=orig_task.get("isolate_env", False),
         parent_run=orig_task.get("parent_run"),
     )
-    state = run_controller(task)
+    from .models import AgentState
+    old_state = AgentState.model_validate(state_data)
+    state = run_controller(task, resume_state=old_state)
     print(f"status: {state.status}")
     print(f"result: {state.result_path}")
 

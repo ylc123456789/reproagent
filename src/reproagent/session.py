@@ -16,23 +16,30 @@ from .models import AgentState
 
 # ── write ──────────────────────────────────────────────────────────
 
-def write_session_card(state: AgentState, **extra_bindings) -> Path:
-    """Write (or overwrite) the session index card in the workspace root."""
+def write_session_card(state: AgentState, *, created_at: str | None = None, **extra_bindings) -> Path:
+    """Write (or overwrite) the session index card in the workspace root.
+
+    On first write, created_at is set to the current time. On resume,
+    pass the original created_at to preserve it; only updated_at is
+    refreshed.
+    """
     ws = state.task.workspace_dir
     ws.mkdir(parents=True, exist_ok=True)
     path = ws / "session.yaml"
 
     now = _utcnow()
+    if created_at is None:
+        created_at = now
+
     bindings = {"conda_env": state.environment.env_name if state.environment else ""}
     if state.task.dataset_cache_dir:
         bindings["dataset_cache"] = state.task.dataset_cache_dir
     bindings.update(extra_bindings)
 
-    # pip cache: same logic as runner._command_env
-    if state.task.dataset_cache_dir:
-        bindings.setdefault("pip_cache", str(
-            Path(state.task.dataset_cache_dir).parent / "pip-cache"
-        ))
+    # pip cache: always record the actual resolved path
+    pip_cache_dir = _resolve_pip_cache(state.task.workspace_dir, state)
+    if pip_cache_dir:
+        bindings.setdefault("pip_cache", pip_cache_dir)
 
     card: dict = {
         "schema_version": 1,
@@ -40,7 +47,7 @@ def write_session_card(state: AgentState, **extra_bindings) -> Path:
         "module": "reproagent",
         "kind": "task_session",
         "status": state.status,
-        "created_at": now,
+        "created_at": created_at,
         "updated_at": now,
         "summary": state.final_summary[:500] if state.final_summary else "",
         "bindings": bindings,
@@ -117,6 +124,16 @@ def session_status(workspace_dir: str | Path) -> dict:
 
 
 # ── helpers ────────────────────────────────────────────────────────
+
+def _resolve_pip_cache(workspace_dir: Path, state: AgentState) -> str:
+    """Resolve the actual pip cache path, matching runner._pip_cache_dir logic."""
+    explicit = os.environ.get("REPROAGENT_PIP_CACHE", "").strip()
+    if explicit:
+        return explicit
+    if state.task.dataset_cache_dir:
+        return str(Path(state.task.dataset_cache_dir).parent / "pip-cache")
+    return str(workspace_dir / ".cache" / "pip")
+
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

@@ -282,8 +282,12 @@ def _mock_run_commands(commands: list[str], state: AgentState):
 
 # ── main loop ─────────────────────────────────────────────────────
 
-def run_controller(task: ReproTask) -> AgentState:
-    """Run the agent loop until finish or step budget exhausted."""
+def run_controller(task: ReproTask, *, resume_state: AgentState | None = None) -> AgentState:
+    """Run the agent loop until finish or step budget exhausted.
+
+    When resume_state is provided, the existing workspace is reused
+    (no re-clone, no re-create conda env) and new steps are appended.
+    """
     task.workspace_dir.mkdir(parents=True, exist_ok=True)
     version = _current_reproagent_version()
     _log(f"workspace: {task.workspace_dir}")
@@ -292,28 +296,35 @@ def run_controller(task: ReproTask) -> AgentState:
     if task.dataset_cache_dir:
         os.environ["REPROAGENT_DATASET_CACHE"] = task.dataset_cache_dir
 
-    # ── init ──────────────────────────────────────────────────
-    if task.mock_llm:
-        repo_context = RepoContext(
-            repo_path=task.workspace_dir / "repo",
-            file_tree="README.md\nsetup.py",
-            readme_text="Mock README",
-            hardware_text="CPU only",
-        )
-        repo_context.repo_path.mkdir(parents=True, exist_ok=True)
-        (repo_context.repo_path / "README.md").write_text("# Mock", encoding="utf-8")
-        environment = EnvironmentInfo(env_name="mock_env", created=True)
+    # ── init or resume ──────────────────────────────────────
+    _created_at: str | None = None
+    if resume_state is not None:
+        state = resume_state
+        state.task = task
+        state.status = "running"
+        repo_context = state.repo_context
+        environment = state.environment
     else:
-        _log("collecting repository, README, hardware, and paper context")
-        repo_context = collect_context(task)
-        _log("preparing conda environment")
-        environment = ensure_environment_for_controller(task)
-
-    state = AgentState(
-        task=task,
-        repo_context=repo_context,
-        environment=environment,
-    )
+        if task.mock_llm:
+            repo_context = RepoContext(
+                repo_path=task.workspace_dir / "repo",
+                file_tree="README.md\nsetup.py",
+                readme_text="Mock README",
+                hardware_text="CPU only",
+            )
+            repo_context.repo_path.mkdir(parents=True, exist_ok=True)
+            (repo_context.repo_path / "README.md").write_text("# Mock", encoding="utf-8")
+            environment = EnvironmentInfo(env_name="mock_env", created=True)
+        else:
+            _log("collecting repository, README, hardware, and paper context")
+            repo_context = collect_context(task)
+            _log("preparing conda environment")
+            environment = ensure_environment_for_controller(task)
+        state = AgentState(
+            task=task,
+            repo_context=repo_context,
+            environment=environment,
+        )
 
     # Bridge hardcoded dataset roots to the shared cache BEFORE the loop:
     # the LLM cannot do this itself (runner blocks ../ in commands) and
@@ -398,7 +409,7 @@ def run_controller(task: ReproTask) -> AgentState:
     state.result_path = result_path
     _log(f"result: {result_path}")
     try:
-        card_path = write_session_card(state)
+        card_path = write_session_card(state, created_at=_created_at)
         _log(f"session card: {card_path}")
     except Exception as exc:
         _log(f"session card skipped: {exc}")
