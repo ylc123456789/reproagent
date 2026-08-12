@@ -1,7 +1,7 @@
 from pathlib import Path
 import subprocess
 
-from reproagent.context import _is_usable_repo, clone_repo
+from reproagent.repository.context import _is_usable_repo, clone_repo
 from reproagent.models import ReproTask
 
 
@@ -35,8 +35,8 @@ def test_clone_retries_and_removes_bad_partial_repo(tmp_path, monkeypatch):
         (repo_path / "README.md").write_text("ok", encoding="utf-8")
         return subprocess.CompletedProcess(cmd, 0, "cloned", "")
 
-    monkeypatch.setattr("reproagent.context.subprocess.run", fake_run)
-    monkeypatch.setattr("reproagent.context.time.sleep", lambda seconds: None)
+    monkeypatch.setattr("reproagent.repository.context.subprocess.run", fake_run)
+    monkeypatch.setattr("reproagent.repository.context.time.sleep", lambda seconds: None)
 
     repo_path = clone_repo(task)
 
@@ -71,7 +71,7 @@ def test_clone_repo_uses_existing_cache_when_network_clone_fails(tmp_path, monke
             return subprocess.CompletedProcess(cmd, 0, "cached clone", "")
         raise AssertionError(f"unexpected command: {cmd}")
 
-    monkeypatch.setattr("reproagent.context.subprocess.run", fake_run)
+    monkeypatch.setattr("reproagent.repository.context.subprocess.run", fake_run)
 
     repo_path = clone_repo(task)
 

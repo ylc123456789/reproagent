@@ -7,7 +7,7 @@ module; the LLM API layer is in llm.py.
 
 from __future__ import annotations
 
-from .context_policy import ContextPolicy
+from .context.policy import ContextPolicy
 from .models import AgentObservation, AgentState, EnvironmentInfo, RepoContext, ReproTask
 
 SYSTEM_PROMPT = """\

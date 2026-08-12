@@ -173,7 +173,7 @@ def test_render_block_empty_without_cache(tmp_path):
 
 def test_turn_prompt_carries_cwd_and_dataset_block(tmp_path):
     """Every rebuilt turn prompt must re-state the absolute cwd and mapping."""
-    from reproagent.context_policy import ContextPolicy
+    from reproagent.context.policy import ContextPolicy
     from reproagent.models import AgentState, RepoContext
     from reproagent.prompts import build_turn_prompt
 
