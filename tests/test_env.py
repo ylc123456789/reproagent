@@ -3,7 +3,7 @@ from reproagent.env import build_backend_command, _env_name
 
 def test_build_backend_command_wraps_conda_run():
     cmd = build_backend_command("repro_demo", "python3 --version", conda="/fake/conda")
-    assert cmd == ["/fake/conda", "run", "--no-capture-output", "-n", "repro_demo", "bash", "-c", "python3 --version"]
+    assert cmd == ["/fake/conda", "run", "--no-capture-output", "-n", "repro_demo", "bash", "-o", "pipefail", "-c", "python3 --version"]
 
 
 def test_env_name_sanitizes_task_id():
@@ -72,3 +72,38 @@ def test_conda_setup_does_not_retry_non_transient_errors(tmp_path, monkeypatch):
 
     assert result.returncode == 1
     assert len(calls) == 1
+
+
+# ── pipefail tests ──────────────────────────────────────────────
+
+def test_pipefail_false_pipe_returns_nonzero(tmp_path):
+    """false | cat must return non-zero with pipefail enabled."""
+    import subprocess
+
+    result = subprocess.run(
+        ["bash", "-o", "pipefail", "-c", "false | cat"],
+        text=True, capture_output=True, timeout=10,
+    )
+    assert result.returncode != 0, f"expected non-zero, got {result.returncode}"
+
+
+def test_pipefail_success_pipe_returns_zero(tmp_path):
+    """true | cat must return zero with pipefail enabled."""
+    import subprocess
+
+    result = subprocess.run(
+        ["bash", "-o", "pipefail", "-c", "true | cat"],
+        text=True, capture_output=True, timeout=10,
+    )
+    assert result.returncode == 0
+
+
+def test_pipefail_non_pipeline_preserves_exit_code(tmp_path):
+    """A command without a pipeline must keep its original exit code."""
+    import subprocess
+
+    result = subprocess.run(
+        ["bash", "-o", "pipefail", "-c", "exit 42"],
+        text=True, capture_output=True, timeout=10,
+    )
+    assert result.returncode == 42
