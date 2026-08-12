@@ -18,6 +18,7 @@ Output:
 ```text
 result.md
 state.json
+session.yaml
 logs/
 patches/
 ```
@@ -31,28 +32,56 @@ the step budget is exhausted.
 
 ```text
 src/reproagent/
-  __init__.py
-  models.py                    # shared Pydantic data structures
-  controller.py                # agent loop — the core of reproagent
-  prompts.py                   # system prompt + turn prompt builders + helpers
-  context_policy.py            # context budget policy scaled to model window
-  llm.py                       # pure API transport layer (serialise, HTTP, retry)
-  runner.py                    # command safety checks, execution, live log streaming
+  __init__.py                  # stable public API: ReproTask, ReproState, CommandPlan, CommandResult
+  agent.py                     # top-level public run/resume API (run_task, resume_task)
+  models.py                    # shared Pydantic data structures (public + persisted state)
+  main.py                      # CLI only: argparse, task assembly, calls into agent.py
+  controller/                  # agentic loop, action dispatch, prompts
+    __init__.py                # re-exports run_controller (ResAgent imports this)
+    loop.py                    # state loop: init/resume, step budget, finish, report + session card
+    actions.py                 # action parsing + execution: run_commands, audit_env, call_coding_agent
+    prompts.py                 # system prompt + turn prompt builders + formatting helpers
+  runtime/                     # side-effect execution
+    runner.py                  # command safety checks, execution, live log streaming,
                                # pip cache layering: REPROAGENT_PIP_CACHE >
                                # sibling of dataset cache > per-workspace
-  audit.py                     # post-setup environment audit (torch/tf/jax)
-  env.py                       # conda environment creation and command wrapping
-  context.py                   # clone repo and collect README/file-tree/hardware
-  dataset_cache.py             # scan hardcoded dataset roots, resolve to absolute
+    environment.py             # conda environment creation and command wrapping (bash -o pipefail)
+    audit.py                   # post-setup environment audit (torch/tf/jax)
+    hardware.py                # lightweight hardware context collection
+    dataset_cache.py           # scan hardcoded dataset roots, resolve to absolute
                                # paths, pre-create symlinks into the shared cache
-  coding.py                    # CodingAgent patch orchestration
-  hardware.py                  # lightweight hardware context collection
-  text.py                      # text normalization for LLM output and reports
-  report.py                    # write result.md and state.json
-  main.py                      # CLI entry point
+  repository/
+    context.py                 # clone repo and collect README/file-tree/hardware
+  context/
+    policy.py                  # context budget policy scaled to model window
   integrations/
-    codingagent.py             # CodingAgent location/import boundary
+    codingagent.py             # CodingAgent location/import boundary + patch orchestration
+  llm.py                       # pure API transport layer (serialise, HTTP, retry) + mock responses
+  session.py                   # session.yaml cards, list/status, resume helpers
+  report.py                    # write result.md and state.json
+  text.py                      # text normalization for LLM output and reports
 ```
+
+Top-level `runner.py`, `env.py`, `audit.py`, `hardware.py`, `dataset_cache.py`,
+`context.py`, `context_policy.py`, `prompts.py`, and `coding.py` remain as thin
+compatibility shims that forward public symbols to the locations above. They
+hold no second implementation.
+
+### Dependency direction
+
+```text
+main
+  -> agent
+      -> controller (loop -> actions -> prompts)
+          -> runtime / repository / context / integrations
+      -> session / report / llm
+
+models
+  <- importable by every layer, imports nothing internal
+```
+
+`models.py` imports no controller, runtime, or integration code. Prompt files
+do no I/O. Report/session modules never trigger agent decisions.
 
 ## 3. Environment Strategy
 
@@ -66,8 +95,11 @@ otherwise               → conda create -n <env> python=<version> -y
 All LLM-proposed commands run through:
 
 ```bash
-conda run -n <env> bash -c "<command>"
+conda run -n <env> bash -o pipefail -c "<command>"
 ```
+
+`pipefail` makes pipeline failures propagate: `python train.py | tail` reports
+the failure of `python`, not the success of `tail`.
 
 ## 4. Workflow (Agent Loop)
 
@@ -79,6 +111,7 @@ initialize:
   → clone repo
   → create conda env
   → collect hardware / file-tree / README context
+  → bridge hardcoded dataset roots into the shared cache (best-effort)
 
 loop (max N steps):
   → build prompt from current state (compacted history + file cache)
@@ -89,6 +122,10 @@ loop (max N steps):
       call_coding_agent  — delegate code modifications to CodingAgent
       finish             — write final report and end the run
   → observe result, update state, repeat
+
+finalize:
+  → write result.md + state.json
+  → write session.yaml card
 ```
 
 Tools are described in the system prompt. The LLM can freely switch between
@@ -120,7 +157,8 @@ model
 temperature 0.2
 ```
 
-All prompt/response pairs are saved to `logs/` for debugging.
+All prompt/response pairs are saved to `logs/` for debugging. `--mock-llm`
+uses the deterministic mock responses in `llm.py` and never hits the network.
 
 ## 7. CodingAgent Integration
 
@@ -138,14 +176,77 @@ Fallback:         importable `coding_agent` package, if available
 ```
 
 `src/reproagent/integrations/codingagent.py` is the only module that resolves
-the path, validates the checkout, and imports the CodingAgent API.
+the path, validates the checkout, imports the CodingAgent API, and orchestrates
+patch requests (goal/constraint building, verification command wrapping).
 
 ReproAgent owns environment creation, dependency installation, audit, hardware
 context, and deciding when to call CodingAgent. CodingAgent owns minimal
 repo-local code/config edits, verification inside the prepared environment,
 and patch report/diff generation.
 
-## 8. Not Yet Implemented
+## 8. Public API
+
+```python
+from reproagent import ReproTask, ReproState, CommandPlan, CommandResult
+from reproagent.controller import run_controller   # loop with full finalization
+from reproagent.agent import run_task, resume_task  # CLI-facing wrappers
+
+state = run_task(ReproTask(...))
+state = resume_task(Path("/path/to/workspace"), "continue with 5 epochs")
+```
+
+CLI:
+
+```text
+reproagent run       --paper ... --repo ... --workspace ... --experiment-goal ...
+reproagent resume    <workspace> --instruction ...
+reproagent list      --root <dir>
+reproagent status    <workspace>
+```
+
+## 9. Session and Workspace Layout
+
+Every task writes into `<workspace_dir>/`:
+
+```text
+state.json         # full AgentState (resume reads this)
+result.md          # final human-readable report
+session.yaml       # session index card (status, bindings, key artifacts)
+logs/              # per-command stdout/stderr, conda setup, audit, LLM traces
+patches/           # CodingAgent patch outputs
+repo/              # cloned repository (cwd for all commands)
+```
+
+Resume semantics: same `task_id` → same conda env; steps are appended to the
+previous state; `attempt_count` increments.
+
+## 10. Adding New Code
+
+- **New agent action**: add the JSON type to `AgentAction.action` in
+  `models.py`, a handler in `controller/actions.py`, dispatch in
+  `controller/loop.py`, and the tool description in `controller/prompts.py`
+  (a prompt change is a behavior change — update the phase0 contract hash
+  deliberately, never inside a refactor).
+- **New runtime capability** (new backend, new cache layer): add a module in
+  `runtime/`; keep `models.py` free of runtime imports.
+- **New integration** (external agent/service): add a module in
+  `integrations/`; nothing else may import the external module directly.
+- **New repository context source**: extend `repository/context.py`.
+
+## 11. Tests
+
+```bash
+cd /home/cyl/reproagent
+conda activate reproagent
+pytest -q                                        # full suite (112+)
+pytest -q tests/test_phase0_contract.py          # behavior freeze locks
+```
+
+Phase 0 contract locks: public exports, CLI parameter set, SYSTEM_PROMPT and
+initial-context hashes, persisted model fields. A refactor must never change
+these; a deliberate behavior change must update them in its own commit.
+
+## 12. Not Yet Implemented
 
 ```text
 Docker backend
