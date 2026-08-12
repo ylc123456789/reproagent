@@ -13,9 +13,8 @@ import re
 import subprocess
 from pathlib import Path
 
-from .coding import run_coding_agent_for_patch
 from .context.policy import ContextPolicy
-from .integrations.codingagent import configured_codingagent_path
+from .integrations.codingagent import configured_codingagent_path, run_coding_agent_for_patch
 from .repository.context import collect_context
 from .llm import call_llm
 from .models import (
