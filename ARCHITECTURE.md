@@ -63,9 +63,12 @@ src/reproagent/
 ```
 
 Top-level `runner.py`, `env.py`, `audit.py`, `hardware.py`, `dataset_cache.py`,
-`context.py`, `context_policy.py`, `prompts.py`, and `coding.py` remain as thin
-compatibility shims that forward public symbols to the locations above. They
-hold no second implementation.
+`context_policy.py`, `prompts.py`, and `coding.py` remain as thin compatibility
+shims that forward public symbols to the locations above. They hold no second
+implementation. `context` is a package (not a shim module): its `__init__.py`
+re-exports `clone_repo`/`collect_context` from `repository.context`, because a
+same-named package shadows a same-named module in Python's import system.
+`tests/test_compat_shims.py` pins all of these legacy paths by identity.
 
 ### Dependency direction
 
