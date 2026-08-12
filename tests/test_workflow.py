@@ -1,5 +1,6 @@
 """Tests for the agent-loop controller."""
-from reproagent.controller import run_controller, _parse_action
+from reproagent.controller import run_controller
+from reproagent.controller.actions import _parse_action
 from reproagent.models import ReproTask
 
 

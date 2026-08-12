@@ -24,7 +24,6 @@ def call_llm(task: ReproTask, system: str, user: str, *, trace_label: str = "") 
     up to 3 times with exponential back-off.
     """
     if task.mock_llm:
-        from .prompts import mock_response
         return mock_response(user)
     return _openai_compatible(task, system, user, trace_label=trace_label)
 
@@ -90,3 +89,12 @@ def _write_llm_trace(task: ReproTask, trace_label: str, system: str, user: str, 
     (prefix.with_suffix(".prompt.txt")).write_text(
         f"[system]\n{system}\n\n[user]\n{user}", encoding="utf-8")
     (prefix.with_suffix(".response.txt")).write_text(response, encoding="utf-8")
+
+
+def mock_response(user: str) -> str:
+    """Deterministic mock actions for tests — returns probe then finish."""
+    if "Begin." in user or "What is your first action" in user:
+        return '{"thinking": "mock: probe the repo", "action": "run_commands", "stage_hint": "probe", "commands": ["head -20 README.md"]}'
+    if "Last Result" in user:
+        return '{"thinking": "mock: done", "action": "finish", "finish_status": "completed", "finish_summary": "Mock run completed."}'
+    return '{"thinking": "mock: done", "action": "finish", "finish_status": "completed", "finish_summary": "Mock run completed."}'

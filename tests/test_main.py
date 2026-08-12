@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from reproagent.main import build_parser
-from reproagent.controller import _git_dirty
+from reproagent.controller.loop import _git_dirty
 
 
 def test_run_parser_requires_and_reads_experiment_goal(tmp_path):
