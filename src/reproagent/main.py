@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .controller import run_controller
+from .agent import resume_task, run_task
 from .integrations.codingagent import configured_codingagent_path
 from .models import ReproTask
 from .session import list_sessions, session_status
@@ -99,7 +99,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "run":
         task = _build_run_task(args)
-        state = run_controller(task)
+        state = run_task(task)
         print(f"status: {state.status}")
         print(f"result: {state.result_path}")
 
@@ -123,56 +123,18 @@ def main(argv: list[str] | None = None) -> None:
 
 def _cmd_resume(args) -> None:
     """Resume a previous task in the same workspace."""
-    import json as _json
-
-    ws = Path(args.workspace)
-    state_path = ws / "state.json"
-    if not state_path.exists():
-        raise SystemExit(f"No state.json found in {ws} — cannot resume.")
-
-    state_data = _json.loads(state_path.read_text(encoding="utf-8"))
-    orig_task = state_data.get("task", {})
-    prev_summary = state_data.get("final_summary", "")
-
-    task = ReproTask(
-        paper_url=orig_task.get("paper_url", ""),
-        repo_url=orig_task.get("repo_url", ""),
-        workspace_dir=ws,
-        repo_cache_dir=Path(orig_task["repo_cache_dir"]) if orig_task.get("repo_cache_dir") else None,
-        task_id=orig_task.get("task_id", ""),  # same task_id → env reused
-        timeout_seconds=args.timeout or orig_task.get("timeout_seconds", 1800),
-        max_steps=args.max_steps or orig_task.get("max_steps", 30),
-        mock_llm=args.mock_llm or orig_task.get("mock_llm", False),
-        model=args.model or orig_task.get("model"),
-        api_base=args.api_base or orig_task.get("api_base", "https://api.openai.com/v1"),
-        api_key_env=args.api_key_env or orig_task.get("api_key_env", "OPENAI_API_KEY"),
-        experiment_goal=_build_resume_goal(orig_task.get("experiment_goal", ""), args.instruction, prev_summary),
-        enable_coding_agent=orig_task.get("enable_coding_agent", False),
-        max_coding_agent_steps=orig_task.get("max_coding_agent_steps", 24),
-        codingagent_path=Path(orig_task["codingagent_path"]) if orig_task.get("codingagent_path") else None,
-        mirror_profile=orig_task.get("mirror_profile", "none"),
-        mirror_strict=orig_task.get("mirror_strict", False),
-        dataset_cache_dir=orig_task.get("dataset_cache_dir", ""),
-        env_namespace=orig_task.get("env_namespace", ""),
-        isolate_env=orig_task.get("isolate_env", False),
-        parent_run=orig_task.get("parent_run"),
+    state = resume_task(
+        args.workspace,
+        args.instruction,
+        max_steps=args.max_steps,
+        model=args.model,
+        api_base=args.api_base,
+        api_key_env=args.api_key_env,
+        mock_llm=args.mock_llm,
+        timeout=args.timeout,
     )
-    from .models import AgentState
-    old_state = AgentState.model_validate(state_data)
-    old_state.attempt_count = getattr(old_state, "attempt_count", 1) + 1
-    state = run_controller(task, resume_state=old_state)
     print(f"status: {state.status}")
     print(f"result: {state.result_path}")
-
-
-def _build_resume_goal(original_goal: str, instruction: str, prev_summary: str) -> str:
-    """Build the experiment goal for a resume run, incorporating previous results."""
-    parts = [f"## Continuation of previous task\n\nNew instruction: {instruction}"]
-    if original_goal:
-        parts.append(f"\nOriginal goal: {original_goal}")
-    if prev_summary:
-        parts.append(f"\nPrevious results (summary): {prev_summary[:2000]}")
-    return "\n".join(parts)
 
 
 if __name__ == "__main__":

@@ -84,7 +84,7 @@ def test_resume_injects_previous_summary_into_goal(tmp_path):
                      experiment_goal="Run original", mock_llm=True, max_steps=3)
     run_controller(task)
 
-    from reproagent.main import _build_resume_goal
+    from reproagent.agent import _build_resume_goal
     goal = _build_resume_goal("Run original", "run 5 more epochs", "3 epochs, 99.04%")
     assert "run 5 more epochs" in goal
     assert "Run original" in goal
