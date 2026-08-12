@@ -14,6 +14,12 @@ from .models import CommandResult
 BLOCKED_SNIPPETS = ["sudo", "rm -rf", "| bash", "> /", "shutdown", "reboot", "conda activate"]
 COMMAND_HEARTBEAT_SECONDS = 60
 
+_INTERNAL_ACTIONS = frozenset({
+    "audit_env",
+    "call_coding_agent",
+    "finish",
+})
+
 
 def is_safe_command(command: str, stage: str | None = None) -> tuple[bool, str | None]:
     """Return whether a command is allowed by the runner safety policy."""

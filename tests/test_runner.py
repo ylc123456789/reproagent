@@ -257,3 +257,77 @@ def test_probe_allows_python_inline_check():
     ok, reason = is_safe_command('python3 -c "import sys; print(sys.version)"', stage="probe")
     assert ok
     assert reason is None
+
+
+# ── internal action interception tests ──────────────────────────
+
+def test_run_commands_blocks_internal_actions(tmp_path, monkeypatch):
+    """audit_env, call_coding_agent, finish must be intercepted before execution."""
+    from reproagent import runner
+
+    called: list[str] = []
+    monkeypatch.setattr(runner, "_run_one", lambda *a, **kw: called.append(a[0]))
+    monkeypatch.setattr(runner, "find_conda", lambda: None)
+
+    results = runner.run_commands(
+        ["audit_env", "call_coding_agent", "finish"],
+        cwd=tmp_path, workspace=tmp_path, stage="environment",
+        attempt=1, timeout=10, env_name="test",
+    )
+    assert called == []  # _run_one never invoked
+    assert len(results) == 3
+    for r in results:
+        assert r.exit_code == -2
+        assert "agent action, not a shell command" in r.stderr_path.read_text(encoding="utf-8")
+
+
+def test_run_commands_mixed_internal_and_real(tmp_path, monkeypatch):
+    """Internal actions are blocked; real commands pass through normally."""
+    from reproagent import runner
+
+    dummy = runner.CommandResult(
+        command="dummy", exit_code=0,
+        stdout_path=tmp_path / "out", stderr_path=tmp_path / "err",
+        duration_seconds=0.0,
+    )
+    called: list[str] = []
+
+    def fake_run_one(*a, **kw):
+        called.append(a[0])
+        return dummy
+
+    monkeypatch.setattr(runner, "_run_one", fake_run_one)
+
+    results = runner.run_commands(
+        ["audit_env", "python -c 'print(1)'"],
+        cwd=tmp_path, workspace=tmp_path, stage="experiment",
+        attempt=1, timeout=10, env_name="test",
+    )
+
+    assert results[0].exit_code == -2  # blocked
+    assert "agent action" in results[0].stderr_path.read_text(encoding="utf-8")
+
+    assert results[1].exit_code == 0  # real command executed
+    assert "python -c" in called[0]
+
+
+def test_run_commands_unknown_string_not_blocked(tmp_path, monkeypatch):
+    """An unknown string is not an internal action and must not be blocked."""
+    from reproagent import runner
+
+    dummy = runner.CommandResult(
+        command="dummy", exit_code=0,
+        stdout_path=tmp_path / "out", stderr_path=tmp_path / "err",
+        duration_seconds=0.0,
+    )
+    called: list[str] = []
+
+    monkeypatch.setattr(runner, "_run_one", lambda *a, **kw: (called.append(a[0]) or dummy))
+
+    results = runner.run_commands(
+        ["echo hello", "run_commands"],
+        cwd=tmp_path, workspace=tmp_path, stage="experiment",
+        attempt=1, timeout=10, env_name="test",
+    )
+    assert len(called) == 2
+    assert all(r.exit_code == 0 for r in results)
