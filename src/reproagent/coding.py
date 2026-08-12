@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import shlex
 
-from .env import find_conda
+from .runtime.environment import find_conda
 from .integrations.codingagent import run_code_task as run_codingagent_code_task
 from .models import CodingAgentResult, CommandPlan, ReproState
 

@@ -1,4 +1,4 @@
-from reproagent.hardware import collect_hardware_text
+from reproagent.runtime.hardware import collect_hardware_text
 
 
 def test_hardware_text_contains_policy():

@@ -1,4 +1,4 @@
-from reproagent.runner import is_safe_command
+from reproagent.runtime.runner import is_safe_command
 
 
 def test_blocks_sudo():
@@ -56,7 +56,7 @@ def test_blocks_real_parent_directory_traversal():
 
 
 def test_command_env_sets_workspace_cache_and_valid_omp(tmp_path, monkeypatch):
-    from reproagent.runner import _command_env
+    from reproagent.runtime.runner import _command_env
 
     monkeypatch.setenv("OMP_NUM_THREADS", "not-a-number")
     monkeypatch.delenv("REPROAGENT_PIP_CACHE", raising=False)
@@ -71,7 +71,7 @@ def test_command_env_sets_workspace_cache_and_valid_omp(tmp_path, monkeypatch):
 
 
 def test_pip_cache_explicit_env_wins(tmp_path, monkeypatch):
-    from reproagent.runner import _command_env
+    from reproagent.runtime.runner import _command_env
 
     shared = tmp_path / "shared_pip"
     monkeypatch.setenv("REPROAGENT_PIP_CACHE", str(shared))
@@ -84,7 +84,7 @@ def test_pip_cache_explicit_env_wins(tmp_path, monkeypatch):
 
 def test_pip_cache_derives_sibling_of_dataset_cache(tmp_path, monkeypatch):
     """Zero-config case: dataset cache set -> pip cache lands next to it."""
-    from reproagent.runner import _command_env
+    from reproagent.runtime.runner import _command_env
 
     monkeypatch.delenv("REPROAGENT_PIP_CACHE", raising=False)
     monkeypatch.setenv("REPROAGENT_DATASET_CACHE", str(tmp_path / "autodl-tmp" / "datasets"))
@@ -95,7 +95,7 @@ def test_pip_cache_derives_sibling_of_dataset_cache(tmp_path, monkeypatch):
 
 
 def test_pip_cache_falls_back_when_shared_unwritable(tmp_path, monkeypatch):
-    from reproagent.runner import _command_env
+    from reproagent.runtime.runner import _command_env
 
     monkeypatch.setenv("REPROAGENT_PIP_CACHE", "/proc/definitely-not-writable/pip")
     env = _command_env(tmp_path / "ws")
@@ -103,7 +103,7 @@ def test_pip_cache_falls_back_when_shared_unwritable(tmp_path, monkeypatch):
 
 
 def test_run_one_writes_full_logs_and_streams_all_experiment_output(tmp_path, monkeypatch, capsys):
-    from reproagent import runner
+    from reproagent.runtime import runner
 
     monkeypatch.setattr(runner, "find_conda", lambda: None)
     monkeypatch.setattr(
@@ -128,7 +128,7 @@ def test_run_one_writes_full_logs_and_streams_all_experiment_output(tmp_path, mo
 
 def test_stream_pipe_displays_carriage_return_experiment_progress():
     import io
-    from reproagent import runner
+    from reproagent.runtime import runner
 
     class NonClosingStringIO(io.StringIO):
         def close(self):
@@ -146,7 +146,7 @@ def test_stream_pipe_displays_carriage_return_experiment_progress():
 
 
 def test_run_one_suppresses_environment_and_probe_raw_output(tmp_path, monkeypatch, capsys):
-    from reproagent import runner
+    from reproagent.runtime import runner
 
     monkeypatch.setattr(runner, "find_conda", lambda: None)
     monkeypatch.setattr(
@@ -165,7 +165,7 @@ def test_run_one_suppresses_environment_and_probe_raw_output(tmp_path, monkeypat
 
 
 def test_run_one_prints_experiment_heartbeat(tmp_path, monkeypatch, capsys):
-    from reproagent import runner
+    from reproagent.runtime import runner
 
     monkeypatch.setattr(runner, "find_conda", lambda: None)
     monkeypatch.setattr(runner, "COMMAND_HEARTBEAT_SECONDS", 0.1)
@@ -183,7 +183,7 @@ def test_run_one_prints_experiment_heartbeat(tmp_path, monkeypatch, capsys):
 
 
 def test_run_one_timeout_writes_timeout_to_stderr(tmp_path, monkeypatch):
-    from reproagent import runner
+    from reproagent.runtime import runner
 
     monkeypatch.setattr(runner, "find_conda", lambda: None)
     monkeypatch.setattr(
@@ -210,7 +210,7 @@ def test_probe_allows_help_but_blocks_training():
 
 def test_run_one_creates_logs_before_process_exits(tmp_path, monkeypatch):
     import time
-    from reproagent import runner
+    from reproagent.runtime import runner
 
     monkeypatch.setattr(runner, "find_conda", lambda: None)
     monkeypatch.setattr(
@@ -263,7 +263,7 @@ def test_probe_allows_python_inline_check():
 
 def test_run_commands_blocks_internal_actions(tmp_path, monkeypatch):
     """audit_env, call_coding_agent, finish must be intercepted before execution."""
-    from reproagent import runner
+    from reproagent.runtime import runner
 
     called: list[str] = []
     monkeypatch.setattr(runner, "_run_one", lambda *a, **kw: called.append(a[0]))
@@ -283,7 +283,7 @@ def test_run_commands_blocks_internal_actions(tmp_path, monkeypatch):
 
 def test_run_commands_mixed_internal_and_real(tmp_path, monkeypatch):
     """Internal actions are blocked; real commands pass through normally."""
-    from reproagent import runner
+    from reproagent.runtime import runner
 
     dummy = runner.CommandResult(
         command="dummy", exit_code=0,
@@ -313,7 +313,7 @@ def test_run_commands_mixed_internal_and_real(tmp_path, monkeypatch):
 
 def test_run_commands_unknown_string_not_blocked(tmp_path, monkeypatch):
     """An unknown string is not an internal action and must not be blocked."""
-    from reproagent import runner
+    from reproagent.runtime import runner
 
     dummy = runner.CommandResult(
         command="dummy", exit_code=0,

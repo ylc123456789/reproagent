@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from reproagent.dataset_cache import (
+from reproagent.runtime.dataset_cache import (
     prepare_dataset_links,
     render_dataset_block,
     scan_dataset_roots,

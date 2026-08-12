@@ -9,7 +9,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .hardware import collect_hardware_text
+from .runtime.hardware import collect_hardware_text
 from .models import RepoContext, ReproTask
 
 CLONE_ATTEMPTS = 3

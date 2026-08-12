@@ -1,4 +1,4 @@
-from reproagent.audit import audit_environment
+from reproagent.runtime.audit import audit_environment
 from reproagent.models import EnvironmentInfo, RepoContext, ReproState, ReproTask
 
 def test_audit_detects_python_outside_expected_env(tmp_path, monkeypatch):
@@ -17,8 +17,8 @@ def test_audit_detects_python_outside_expected_env(tmp_path, monkeypatch):
         stdout = '{"sys_executable":"/home/cyl/miniconda3/bin/python","pip_version":"pip 1 from /home/cyl/miniconda3/lib/python3.14/site-packages/pip","torch":{"version":"2.13.0+cu130","file":"/home/cyl/miniconda3/lib/python3.14/site-packages/torch/__init__.py","cuda_compiled":"13.0","cuda_available":false,"device_count":0}}'
         stderr = ""
 
-    monkeypatch.setattr("reproagent.audit.find_conda", lambda: "/fake/conda")
-    monkeypatch.setattr("reproagent.audit.subprocess.run", lambda *args, **kwargs: Result())
+    monkeypatch.setattr("reproagent.runtime.audit.find_conda", lambda: "/fake/conda")
+    monkeypatch.setattr("reproagent.runtime.audit.subprocess.run", lambda *args, **kwargs: Result())
 
     audit = audit_environment(state)
 
@@ -44,8 +44,8 @@ def test_audit_passes_when_python_and_torch_are_inside_env(tmp_path, monkeypatch
         stdout = '{"sys_executable":"' + env_prefix + '/bin/python","pip_version":"pip 1 from ' + env_prefix + '/lib/python3.10/site-packages/pip","torch":{"version":"2.1.0","file":"' + env_prefix + '/lib/python3.10/site-packages/torch/__init__.py","cuda_compiled":null,"cuda_available":false,"device_count":0}}'
         stderr = ""
 
-    monkeypatch.setattr("reproagent.audit.find_conda", lambda: "/fake/conda")
-    monkeypatch.setattr("reproagent.audit.subprocess.run", lambda *args, **kwargs: Result())
+    monkeypatch.setattr("reproagent.runtime.audit.find_conda", lambda: "/fake/conda")
+    monkeypatch.setattr("reproagent.runtime.audit.subprocess.run", lambda *args, **kwargs: Result())
 
     audit = audit_environment(state)
 
@@ -68,8 +68,8 @@ def test_audit_requires_repair_for_numpy_abi_warning(tmp_path, monkeypatch):
         stdout = '{"sys_executable":"' + env_prefix + '/bin/python","pip_version":"pip 1 from ' + env_prefix + '/lib/python3.10/site-packages/pip","torch":{"version":"2.1.0+cu121","file":"' + env_prefix + '/lib/python3.10/site-packages/torch/__init__.py","cuda_compiled":"12.1","cuda_available":true,"device_count":1}}'
         stderr = "A module that was compiled using NumPy 1.x cannot be run in NumPy 2.2.6\n_ARRAY_API not found"
 
-    monkeypatch.setattr("reproagent.audit.find_conda", lambda: "/fake/conda")
-    monkeypatch.setattr("reproagent.audit.subprocess.run", lambda *args, **kwargs: Result())
+    monkeypatch.setattr("reproagent.runtime.audit.find_conda", lambda: "/fake/conda")
+    monkeypatch.setattr("reproagent.runtime.audit.subprocess.run", lambda *args, **kwargs: Result())
 
     audit = audit_environment(state)
 
@@ -93,8 +93,8 @@ def test_audit_passes_with_custom_conda_env_dir(tmp_path, monkeypatch):
         stdout = '{"sys_executable":"' + env_prefix + '/bin/python","sys_prefix":"' + env_prefix + '","pip_version":"pip 1 from ' + env_prefix + '/lib/python3.10/site-packages/pip","torch":{"version":"2.6.0+cu124","file":"' + env_prefix + '/lib/python3.10/site-packages/torch/__init__.py","cuda_compiled":"12.4","cuda_available":true,"device_count":1}}'
         stderr = ""
 
-    monkeypatch.setattr("reproagent.audit.find_conda", lambda: "/fake/conda")
-    monkeypatch.setattr("reproagent.audit.subprocess.run", lambda *args, **kwargs: Result())
+    monkeypatch.setattr("reproagent.runtime.audit.find_conda", lambda: "/fake/conda")
+    monkeypatch.setattr("reproagent.runtime.audit.subprocess.run", lambda *args, **kwargs: Result())
 
     audit = audit_environment(state)
 
@@ -122,9 +122,9 @@ def test_audit_uses_sanitized_command_environment(tmp_path, monkeypatch):
         captured.update(kwargs)
         return Result()
 
-    monkeypatch.setattr("reproagent.audit.find_conda", lambda: "/fake/conda")
+    monkeypatch.setattr("reproagent.runtime.audit.find_conda", lambda: "/fake/conda")
     monkeypatch.setenv("OMP_NUM_THREADS", "bad")
-    monkeypatch.setattr("reproagent.audit.subprocess.run", fake_run)
+    monkeypatch.setattr("reproagent.runtime.audit.subprocess.run", fake_run)
 
     audit = audit_environment(state)
 

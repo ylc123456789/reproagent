@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 
 from reproagent.controller import run_controller
-from reproagent.env import _env_name
+from reproagent.runtime.environment import _env_name
 from reproagent.models import ReproTask
 from reproagent.session import list_sessions, session_status, write_session_card
 

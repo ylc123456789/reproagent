@@ -90,7 +90,7 @@ def build_initial_context(task: ReproTask, repo_context: RepoContext, environmen
                           policy: ContextPolicy | None = None,
                           dataset_links: list[dict] | None = None) -> str:
     """Build the very first user message — only called once at the start."""
-    from .dataset_cache import render_dataset_block
+    from .runtime.dataset_cache import render_dataset_block
     env_text = _env_line(environment)
     readme_limit = policy.readme_chars if policy else 16000
     dataset_block = render_dataset_block(task, repo_context.repo_path, dataset_links or [])
@@ -149,7 +149,7 @@ def build_turn_prompt(state: AgentState, policy: ContextPolicy) -> str:
     parts.append(f"Timeout: {state.task.timeout_seconds}s | Steps used: {len(state.steps)}/{state.task.max_steps} (max)")
 
     # --- dataset cache (absolute-path mapping, system-resolved) ---
-    from .dataset_cache import render_dataset_block
+    from .runtime.dataset_cache import render_dataset_block
     repo_path = state.repo_context.repo_path if state.repo_context else None
     dataset_block = render_dataset_block(state.task, repo_path, state.dataset_links)
     if dataset_block:

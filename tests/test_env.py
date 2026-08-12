@@ -1,4 +1,4 @@
-from reproagent.env import build_backend_command, _env_name
+from reproagent.runtime.environment import build_backend_command, _env_name
 
 
 def test_build_backend_command_wraps_conda_run():
@@ -16,14 +16,14 @@ def test_find_conda_uses_env_var(tmp_path, monkeypatch):
     conda.write_text("", encoding="utf-8")
     monkeypatch.setenv("REPROAGENT_CONDA_EXE", str(conda))
 
-    from reproagent.env import find_conda
+    from reproagent.runtime.environment import find_conda
 
     assert find_conda() == str(conda)
 
 
 def test_conda_setup_retries_transient_http_errors(tmp_path, monkeypatch):
     import subprocess
-    from reproagent import env
+    from reproagent.runtime import environment as env
 
     calls = []
 
@@ -52,7 +52,7 @@ def test_conda_setup_retries_transient_http_errors(tmp_path, monkeypatch):
 
 def test_conda_setup_does_not_retry_non_transient_errors(tmp_path, monkeypatch):
     import subprocess
-    from reproagent import env
+    from reproagent.runtime import environment as env
 
     calls = []
 

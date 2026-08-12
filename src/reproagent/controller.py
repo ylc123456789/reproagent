@@ -13,10 +13,8 @@ import re
 import subprocess
 from pathlib import Path
 
-from .audit import audit_environment
 from .coding import run_coding_agent_for_patch
 from .context import collect_context
-from .env import ensure_environment
 from .integrations.codingagent import configured_codingagent_path
 from .context_policy import ContextPolicy
 from .llm import call_llm
@@ -32,8 +30,10 @@ from .models import (
 )
 from .prompts import SYSTEM_PROMPT, build_initial_context, build_turn_prompt
 from .report import write_agent_result
+from .runtime.audit import audit_environment
+from .runtime.environment import ensure_environment
+from .runtime.runner import run_commands
 from .session import write_session_card
-from .runner import run_commands
 
 
 # ── helpers ───────────────────────────────────────────────────────
@@ -332,7 +332,7 @@ def run_controller(task: ReproTask, *, resume_state: AgentState | None = None) -
     # relative-path reasoning is where it fails. Best-effort, never fatal.
     if task.dataset_cache_dir:
         try:
-            from .dataset_cache import prepare_dataset_links
+            from .runtime.dataset_cache import prepare_dataset_links
             state.dataset_links = prepare_dataset_links(
                 repo_path=repo_context.repo_path,
                 workspace_dir=task.workspace_dir,
