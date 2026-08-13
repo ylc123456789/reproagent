@@ -16,8 +16,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     # --- run ---
     run = sub.add_parser("run")
-    run.add_argument("--paper", required=True, help="Paper URL")
-    run.add_argument("--repo", required=True, help="Git repository URL")
+    run.add_argument("--paper", default="", help="Paper URL (reproduction mode when given)")
+    run.add_argument("--repo", default="", help="Git repository URL to clone (isolated mode)")
+    run.add_argument("--copy-from", default="",
+                     help="Local worktree to copy into the workspace (copy mode, preserves uncommitted changes)")
+    run.add_argument("--external-repo", default="",
+                     help="Existing repository to operate on in place (shared mode)")
+    run.add_argument("--setup-only", action="store_true",
+                     help="Prepare the environment and finish without running experiments")
     run.add_argument("--workspace", required=True, type=Path, help="Run workspace directory")
     run.add_argument("--repo-cache-dir", type=Path, default=None, help="Optional local cache directory for cloned repos")
     run.add_argument("--mock-llm", action="store_true", help="Use deterministic mock LLM for local tests")
@@ -91,6 +97,9 @@ def _build_run_task(args) -> ReproTask:
         dataset_cache_dir=args.dataset_cache,
         env_namespace=getattr(args, "env_namespace", ""),
         isolate_env=getattr(args, "isolate_env", False),
+        copy_from=args.copy_from,
+        external_repo_path=args.external_repo,
+        setup_only=args.setup_only,
     )
 
 

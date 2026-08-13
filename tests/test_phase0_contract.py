@@ -36,6 +36,8 @@ def test_public_package_contract() -> None:
 def test_cli_contract() -> None:
     commands = _subcommands(build_parser())
     assert set(commands) == {"run", "resume", "list", "status"}
+    # experiment-operator contract v1 (O6): --copy-from/--external-repo/
+    # --setup-only added deliberately; --paper/--repo became optional.
     assert _options(commands["run"]) == {
         "-h", "--help", "--paper", "--repo", "--workspace", "--repo-cache-dir",
         "--mock-llm", "--model", "--api-base", "--api-key-env", "--backend",
@@ -43,6 +45,7 @@ def test_cli_contract() -> None:
         "--confirm-before-experiment", "--dataset-cache", "--enable-coding-agent",
         "--max-coding-agent-steps", "--codingagent-path", "--config",
         "--mirror-profile", "--mirror-strict", "--env-namespace", "--isolate-env",
+        "--copy-from", "--external-repo", "--setup-only",
     }
 
 

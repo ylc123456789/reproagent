@@ -79,3 +79,27 @@ def test_run_parser_reads_codingagent_path_and_config(tmp_path):
     ])
     assert args.codingagent_path == Path("/home/cyl/CodingAgent")
     assert args.config == tmp_path / "reproagent.yaml"
+
+
+def test_run_parser_paper_and_repo_now_optional(tmp_path):
+    """Operator contract: --paper/--repo optional; workspace sources choose the mode."""
+    parser = build_parser()
+    args = parser.parse_args([
+        "run", "--external-repo", str(tmp_path / "repo"),
+        "--workspace", str(tmp_path / "ws"),
+        "--experiment-goal", "Run MNIST.",
+    ])
+    assert args.paper == ""
+    assert args.repo == ""
+    assert args.external_repo == str(tmp_path / "repo")
+
+
+def test_run_parser_reads_copy_from_and_setup_only(tmp_path):
+    parser = build_parser()
+    args = parser.parse_args([
+        "run", "--copy-from", str(tmp_path / "src"),
+        "--workspace", str(tmp_path / "ws"),
+        "--experiment-goal", "prepare env", "--setup-only",
+    ])
+    assert args.copy_from == str(tmp_path / "src")
+    assert args.setup_only
