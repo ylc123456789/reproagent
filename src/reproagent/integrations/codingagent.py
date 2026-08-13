@@ -80,9 +80,22 @@ def run_code_task(
     api_key_env: str,
     model: str,
     output_dir: Path,
+    env_policy: str = "",
+    env_name: str = "",
 ):
-    """Run CodingAgent through its Python API."""
+    """Run CodingAgent through its Python API.
+
+    env_policy (auto/reuse_only/frozen) and env_name are execution-contract
+    fields.  Older CodingAgent checkouts without them stay supported — the
+    fields are simply not passed and the textual constraints remain the
+    fallback (graceful degradation).
+    """
     with _codingagent_api(codingagent_path) as api:
+        supported = {
+            field: value
+            for field, value in (("env_policy", env_policy), ("env_name", env_name))
+            if value and field in getattr(api.CodeTaskSpec, "model_fields", {})
+        }
         spec = api.CodeTaskSpec(
             workspace_path=repo_path,
             task_goal=task_goal,
@@ -94,6 +107,7 @@ def run_code_task(
             api_key_env=api_key_env,
             model=model,
             output_dir=output_dir,
+            **supported,
         )
         return api.run_code_task(spec)
 
@@ -203,6 +217,10 @@ def run_coding_agent_for_patch(state: ReproState, plan: CommandPlan) -> CodingAg
         api_key_env=state.task.api_key_env,
         model=state.task.model or "gpt-4.1",
         output_dir=output_dir,
+        # Delegated code work must never mutate the operator's environment;
+        # old checkouts without the field keep the textual constraints.
+        env_policy="frozen",
+        env_name=state.environment.env_name if state.environment else "",
     )
     return CodingAgentResult(
         status=report.status,

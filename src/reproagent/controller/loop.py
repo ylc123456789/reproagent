@@ -204,6 +204,19 @@ def run_controller(task: ReproTask, *, resume_state: AgentState | None = None) -
             observation = _tool_audit_env(state)
         elif action.action == "call_coding_agent":
             observation = _tool_call_coding_agent(action, state)
+            if not state.task.allow_code_delegation:
+                # Structured exit: the orchestrator routes a CodingAgent task
+                # against this repo and resumes this session afterwards.
+                state.status = "blocked"
+                issues = action.coding_issues or [action.coding_goal or "unspecified"]
+                state.final_summary = (
+                    "Code changes are required but code delegation is disabled "
+                    "by the caller.\nCoding issues:\n"
+                    + "\n".join(f"- {issue}" for issue in issues)
+                )
+                state.steps.append(observation)
+                _log(f"finish: {state.status} (code delegation disabled)")
+                break
         else:  # finish
             state.status = action.finish_status or "completed"
             state.final_summary = action.finish_summary

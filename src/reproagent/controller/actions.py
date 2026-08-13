@@ -147,6 +147,16 @@ def _tool_audit_env(state: AgentState) -> AgentObservation:
 
 def _tool_call_coding_agent(action: AgentAction, state: AgentState) -> AgentObservation:
     """Delegate a code modification to CodingAgent and collect the result."""
+    if not state.task.allow_code_delegation:
+        issues = action.coding_issues or [action.coding_goal or "unspecified"]
+        return AgentObservation(
+            step=len(state.steps) + 1,
+            action="call_coding_agent",
+            stage_hint="coding",
+            error="blocked: code delegation is disabled by the caller — "
+                  "the orchestrator routes a CodingAgent task and resumes this "
+                  "session. Issues: " + "; ".join(issues),
+        )
     if not state.task.enable_coding_agent:
         return AgentObservation(
             step=len(state.steps) + 1,

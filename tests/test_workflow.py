@@ -99,3 +99,29 @@ def test_setup_only_mock_run_appends_provisioning_summary(tmp_path):
     assert state.status == "completed"
     assert "## Environment Provisioning" in state.final_summary
     assert "mock_env" in state.final_summary
+
+
+# ── code delegation switch (contract O9) ──────────────────────────
+
+def test_controller_delegation_disabled_exits_blocked(tmp_path, monkeypatch):
+    """allow_code_delegation=False: call_coding_agent ends the run blocked
+    with the coding issues listed, instead of delegating."""
+    import reproagent.llm as llm_module
+
+    monkeypatch.setattr(
+        llm_module,
+        "mock_response",
+        lambda user: '{"thinking": "need patch", "action": "call_coding_agent", '
+                     '"coding_goal": "add loss logging", "coding_issues": ["missing loss"]}',
+    )
+    task = ReproTask(
+        repo_url="repo", workspace_dir=tmp_path / "run",
+        experiment_goal="g", mock_llm=True, max_steps=5,
+        allow_code_delegation=False,
+    )
+    state = run_controller(task)
+
+    assert state.status == "blocked"
+    assert "missing loss" in state.final_summary
+    assert any(step.action == "call_coding_agent" for step in state.steps)
+    assert not state.coding_results  # no delegation actually happened
