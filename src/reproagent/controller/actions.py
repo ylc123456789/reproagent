@@ -22,7 +22,7 @@ from ..models import (
     EnvironmentAudit,
 )
 from ..runtime.audit import audit_environment
-from ..runtime.runner import run_commands
+from ..runtime.runner import _is_setup_command, run_commands
 
 
 def _parse_action(text: str) -> AgentAction | None:
@@ -87,14 +87,18 @@ def _tool_run_commands(action: AgentAction, state: AgentState) -> AgentObservati
             stage_hint=action.stage_hint,
             error="no commands provided",
         )
-    if state.task.setup_only and action.stage_hint == "experiment":
-        return AgentObservation(
-            step=len(state.steps) + 1,
-            action=action.action,
-            stage_hint=action.stage_hint,
-            error="setup_only task: experiment commands are not allowed — "
-                  "prepare the environment and call finish",
-        )
+    if state.task.setup_only:
+        # Deterministic whitelist — does NOT rely on the LLM's stage_hint:
+        # script/module execution is blocked whatever label the model used.
+        blocked = [cmd for cmd in commands if not _is_setup_command(cmd)]
+        if blocked:
+            return AgentObservation(
+                step=len(state.steps) + 1,
+                action=action.action,
+                stage_hint=action.stage_hint,
+                error="setup_only task: command not allowed (provisioning and "
+                      "inspection only): " + "; ".join(blocked),
+            )
     if (state.task.confirm_before_experiment and action.stage_hint == "experiment"
             and not _confirm_experiment(commands)):
         return AgentObservation(
@@ -112,7 +116,7 @@ def _tool_run_commands(action: AgentAction, state: AgentState) -> AgentObservati
             commands,
             cwd=state.repo_context.repo_path if state.repo_context else state.task.workspace_dir,
             workspace=state.task.workspace_dir,
-            stage=action.stage_hint or "agent",
+            stage="setup" if state.task.setup_only else (action.stage_hint or "agent"),
             attempt=len(state.steps) + 1,
             timeout=state.task.timeout_seconds,
             env_name=env_name,

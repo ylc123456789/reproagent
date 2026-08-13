@@ -133,7 +133,7 @@ def run_controller(task: ReproTask, *, resume_state: AgentState | None = None) -
             _log("collecting repository, README, hardware, and paper context")
             repo_context = collect_context(task)
             _log("preparing conda environment")
-            environment = ensure_environment_for_controller(task)
+            environment = ensure_environment_for_controller(task, repo_context)
         state = AgentState(
             task=task,
             repo_context=repo_context,
@@ -221,6 +221,14 @@ def run_controller(task: ReproTask, *, resume_state: AgentState | None = None) -
             state.status = action.finish_status or "completed"
             state.final_summary = action.finish_summary
             if task.setup_only:
+                # Deterministic gate: a setup-only task may only complete
+                # after a successful environment audit.
+                if state.last_audit is None or not state.last_audit.success:
+                    state.status = "failed"
+                    state.final_summary += (
+                        "\n\nSetup-only completion requires a successful "
+                        "audit_env; the audit is missing or failed."
+                    )
                 state.final_summary += _provisioning_summary(state)
             _log(f"finish: {state.status}")
             break
@@ -259,12 +267,14 @@ def run_controller(task: ReproTask, *, resume_state: AgentState | None = None) -
     return state
 
 
-def ensure_environment_for_controller(task: ReproTask):
-    """Create or reuse conda env, returning EnvironmentInfo."""
-    env_state = AgentState(
-        task=task,
-        repo_context=RepoContext(repo_path=task.workspace_dir / "repo"),
-    )
+def ensure_environment_for_controller(task: ReproTask, repo_context: RepoContext) -> EnvironmentInfo:
+    """Create or reuse the conda env for the resolved repository.
+
+    The environment is created with the RESOLVED repo path as cwd — never a
+    rebuilt workspace/repo path.  In shared mode that is the external repo,
+    where environment.yml lives and setup commands must run.
+    """
+    env_state = AgentState(task=task, repo_context=repo_context)
     return ensure_environment(env_state)  # type: ignore[arg-type]
 
 

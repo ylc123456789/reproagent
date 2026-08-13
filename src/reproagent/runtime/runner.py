@@ -31,6 +31,8 @@ def is_safe_command(command: str, stage: str | None = None) -> tuple[bool, str |
         return False, "blocked parent-directory traversal"
     if stage == "probe" and not _is_probe_command(command):
         return False, "probe stage only allows help/config/listing/inline inspection commands"
+    if stage == "setup" and not _is_setup_command(command):
+        return False, "setup stage only allows provisioning and inspection commands"
     return True, None
 
 
@@ -50,6 +52,34 @@ def _is_probe_command(command: str) -> bool:
                         "which ", "python --version", "python3 --version",
                         "python -c", "python3 -c")
     return lowered.startswith(allowed_prefixes)
+
+
+_SETUP_ALLOWED_FIRST_WORDS = {
+    "pip", "pip3", "ls", "find", "rg", "grep", "sed", "cat", "head", "tail",
+    "wc", "pwd", "which", "git", "mkdir", "cp", "mv", "ln", "wget", "curl",
+    "echo",
+}
+
+
+def _is_setup_command(command: str) -> bool:
+    """Return whether a command is allowed during setup_only provisioning.
+
+    Deterministic whitelist — independent of LLM stage labels.  Only package
+    installation, file inspection, and setup chores pass; direct script or
+    module execution (python train.py, ./run.sh, bash x.sh, make ...) never
+    does, so experiments cannot run in setup_only mode.
+    """
+    lowered = command.strip().lower()
+    if "--help" in lowered or lowered.endswith(" -h") or " -h " in lowered:
+        return True
+    if lowered.startswith(("python -m pip ", "python3 -m pip ",
+                           "python -m py_compile ", "python3 -m py_compile ",
+                           "python --version", "python3 --version",
+                           "python -V", "python3 -V",
+                           "python -c ", "python3 -c ")):
+        return True
+    first = lowered.split()[0] if lowered.split() else ""
+    return first in _SETUP_ALLOWED_FIRST_WORDS
 
 
 def _has_parent_directory_traversal(command: str) -> bool:

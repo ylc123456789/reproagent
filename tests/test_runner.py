@@ -208,6 +208,23 @@ def test_probe_allows_help_but_blocks_training():
     assert "probe stage" in reason
 
 
+def test_setup_stage_allows_provisioning_and_inspection():
+    for cmd in ("pip install -r requirements.txt", "python -m pip install x",
+                "head -20 README.md", "git status", "echo ok",
+                "python -c \"print(1)\"", "python train.py --help"):
+        ok, reason = is_safe_command(cmd, stage="setup")
+        assert ok, f"{cmd}: {reason}"
+
+
+def test_setup_stage_blocks_script_execution():
+    """Deterministic: no script/module execution regardless of LLM labels."""
+    for cmd in ("python train.py", "python3 main.py --epochs 10", "bash run.sh",
+                "./run.sh", "make", "python setup.py install", "python -m train"):
+        ok, reason = is_safe_command(cmd, stage="setup")
+        assert not ok, cmd
+        assert "setup stage" in reason
+
+
 def test_run_one_creates_logs_before_process_exits(tmp_path, monkeypatch):
     import time
     from reproagent.runtime import runner

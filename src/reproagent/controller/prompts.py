@@ -211,8 +211,17 @@ SETUP_ONLY_DIRECTIVE = """
 This is an environment-provisioning task. Install dependencies
 (environment.yml/requirements.txt/pyproject.toml as needed, aligned with the
 mirror policy and GPU capability), then run audit_env, and finish with a
-summary of the prepared environment. Do NOT run any experiment, training,
-evaluation, or benchmark commands — stage_hint must never be "experiment"."""
+summary of the prepared environment.
+
+The runner enforces a deterministic command whitelist (independent of
+stage_hint): only package installation (pip), inspection (ls/cat/grep/
+head/tail/find/rg/sed/wc/pwd/which), --help probes, python -m py_compile,
+python -c checks, and setup chores (git/mkdir/cp/mv/ln/wget/curl/echo) are
+allowed. Direct script or module execution (python *.py, ./run.sh,
+bash x.sh, make ...) is blocked — experiments cannot run here.
+
+A successful audit_env is REQUIRED before finish; without it the run ends
+failed."""
 
 
 def _env_line(env: EnvironmentInfo) -> str:
