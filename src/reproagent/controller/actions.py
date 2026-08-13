@@ -157,6 +157,7 @@ def _tool_call_coding_agent(action: AgentAction, state: AgentState) -> AgentObse
             step=len(state.steps) + 1,
             action="call_coding_agent",
             stage_hint="coding",
+            coding_issues=issues,
             error="blocked: code delegation is disabled by the caller — "
                   "the orchestrator routes a CodingAgent task and resumes this "
                   "session. Issues: " + "; ".join(issues),

@@ -182,3 +182,43 @@ def test_collect_context_shared_writes_artifacts_to_own_workspace(tmp_path):
     assert ctx.repo_path == ext.resolve()
     assert (tmp_path / "ws" / "context" / "context_summary.md").exists()
     assert not (tmp_path / "ws" / "repo").exists()
+
+
+def test_clone_repo_replaces_existing_repo_with_different_remote(tmp_path):
+    """An existing workspace/repo from a different origin must never be
+    silently reused — it is replaced with the requested repository."""
+    ws = tmp_path / "ws"
+    stale = _make_git_repo(ws / "repo", content="stale")
+    subprocess.run(
+        ["git", "-C", str(stale), "remote", "add", "origin",
+         "https://example.invalid/old-repo.git"],
+        check=True,
+    )
+    upstream = _make_git_repo(tmp_path / "upstream", content="fresh")
+
+    repo = clone_repo(ReproTask(repo_url=str(upstream), workspace_dir=ws))
+
+    assert (repo / "README.md").read_text(encoding="utf-8") == "fresh"
+
+
+def test_clone_repo_replaces_unverifiable_existing_repo(tmp_path):
+    """A usable repo without an origin cannot be verified → re-clone."""
+    ws = tmp_path / "ws"
+    _make_git_repo(ws / "repo", content="no-remote")  # git init, no origin
+    upstream = _make_git_repo(tmp_path / "upstream", content="fresh")
+
+    repo = clone_repo(ReproTask(repo_url=str(upstream), workspace_dir=ws))
+
+    assert (repo / "README.md").read_text(encoding="utf-8") == "fresh"
+
+
+def test_clone_repo_reuses_matching_existing_repo(tmp_path):
+    """Same origin → the existing checkout is reused, not re-cloned."""
+    upstream = _make_git_repo(tmp_path / "upstream", content="v1")
+    ws = tmp_path / "ws"
+    first = clone_repo(ReproTask(repo_url=str(upstream), workspace_dir=ws))
+    (first / "extra.txt").write_text("keep", encoding="utf-8")
+
+    repo = clone_repo(ReproTask(repo_url=str(upstream), workspace_dir=ws))
+
+    assert (repo / "extra.txt").exists()  # reused — re-clone would drop it

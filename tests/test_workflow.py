@@ -194,5 +194,7 @@ def test_controller_delegation_disabled_exits_blocked(tmp_path, monkeypatch):
 
     assert state.status == "blocked"
     assert "missing loss" in state.final_summary
-    assert any(step.action == "call_coding_agent" for step in state.steps)
     assert not state.coding_results  # no delegation actually happened
+    # structured field for orchestrators — no text parsing needed
+    blocked_obs = next(step for step in state.steps if step.action == "call_coding_agent")
+    assert blocked_obs.coding_issues == ["missing loss"]

@@ -274,3 +274,24 @@ def test_session_status_tolerates_legacy_card_without_bindings(tmp_path):
     )
     info = session_status(tmp_path)
     assert info["session"]["session_id"] == "old-1"
+
+
+def test_bindings_legacy_zero_source_resume_writes_valid_mode(tmp_path):
+    """Resume of a legacy zero-source task still writes the repo binding,
+    and the mode is never the non-contract value 'resume'."""
+    from reproagent.models import AgentState, RepoContext
+    from reproagent.session import _read_yaml
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    task = ReproTask(workspace_dir=tmp_path)  # all sources empty (legacy resume)
+    state = AgentState(
+        task=task,
+        repo_context=RepoContext(repo_path=repo),
+        status="completed",
+    )
+    write_session_card(state)
+
+    repo_binding = _read_yaml(tmp_path / "session.yaml")["bindings"]["repo"]
+    assert repo_binding["mode"] == "isolated"  # never "resume"
+    assert repo_binding["path"] == str(repo)

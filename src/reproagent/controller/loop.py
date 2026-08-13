@@ -207,8 +207,10 @@ def run_controller(task: ReproTask, *, resume_state: AgentState | None = None) -
             if not state.task.allow_code_delegation:
                 # Structured exit: the orchestrator routes a CodingAgent task
                 # against this repo and resumes this session afterwards.
+                # The issues list is persisted on the observation
+                # (observation.coding_issues) for stable programmatic reads.
                 state.status = "blocked"
-                issues = action.coding_issues or [action.coding_goal or "unspecified"]
+                issues = observation.coding_issues
                 state.final_summary = (
                     "Code changes are required but code delegation is disabled "
                     "by the caller.\nCoding issues:\n"

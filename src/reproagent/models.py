@@ -149,6 +149,9 @@ class AgentObservation(BaseModel):
     command_results: list[CommandResult] = Field(default_factory=list)
     audit: EnvironmentAudit | None = None
     coding_result: CodingAgentResult | None = None
+    # Structured issues for blocked code-delegation exits — orchestrators
+    # read this instead of parsing the text summary.
+    coding_issues: list[str] = Field(default_factory=list)
     error: str = ""
 
 

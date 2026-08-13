@@ -43,8 +43,12 @@ def write_session_card(state: AgentState, *, created_at: str | None = None, **ex
     bindings = {"conda_env": state.environment.env_name if state.environment else ""}
     # Execution contract v1 bindings sub-schema (additive — the flat keys
     # above stay for backward compatibility; readers tolerate absence).
+    # Contract modes are isolated/copy/shared only; a legacy zero-source
+    # task (resume of a pre-contract workspace) is a private workspace copy.
     mode = workspace_mode(state.task)
-    if state.repo_context is not None and mode != "resume":
+    if mode == "resume":
+        mode = "isolated"
+    if state.repo_context is not None:
         bindings["repo"] = {
             "path": str(state.repo_context.repo_path),
             "origin": state.task.repo_url or "local",

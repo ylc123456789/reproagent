@@ -23,9 +23,9 @@ def clone_repo(task: ReproTask) -> Path:
     log_dir.mkdir(parents=True, exist_ok=True)
 
     if repo_path.exists():
-        if _is_usable_repo(repo_path):
+        if _is_usable_repo(repo_path) and _repo_matches(repo_path, task.repo_url):
             return repo_path
-        _remove_path(repo_path)
+        _remove_path(repo_path)  # stale or a different repository — re-clone
 
     repo_path.parent.mkdir(parents=True, exist_ok=True)
     cache_dir = _repo_cache_dir(task)
@@ -272,6 +272,30 @@ def _write_clone_logs(log_dir: Path, result: subprocess.CompletedProcess[str], a
     (log_dir / f"clone_{attempt:02d}.stderr").write_text(stderr, encoding="utf-8", errors="replace")
     (log_dir / "clone.stdout").write_text(stdout, encoding="utf-8", errors="replace")
     (log_dir / "clone.stderr").write_text(stderr, encoding="utf-8", errors="replace")
+
+
+def _repo_matches(repo_path: Path, repo_url: str) -> bool:
+    """Return whether the existing checkout's origin is the requested URL.
+
+    A usable repo without a verifiable origin (no .git, no remote) is
+    treated as non-matching — never silently reuse an unverified checkout.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_path), "remote", "get-url", "origin"],
+            text=True, capture_output=True, timeout=10,
+        )
+    except Exception:
+        return False
+    return result.returncode == 0 and _normalize_repo_url(result.stdout) == _normalize_repo_url(repo_url)
+
+
+def _normalize_repo_url(url: str) -> str:
+    """Compare-friendly URL form: drop trailing slash and .git suffix."""
+    normalized = url.strip().rstrip("/")
+    if normalized.endswith(".git"):
+        normalized = normalized[:-4]
+    return normalized
 
 
 def _is_usable_repo(repo_path: Path) -> bool:
