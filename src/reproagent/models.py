@@ -18,9 +18,16 @@ def _task_id() -> str:
 
 
 class ReproTask(BaseModel):
-    """Reproduction task configuration."""
-    paper_url: str
-    repo_url: str
+    """Experiment-operator task configuration.
+
+    A new task must declare exactly one repository source (see
+    repository.context.setup_workspace): repo_url clones an isolated copy,
+    copy_from copies a local worktree (uncommitted changes preserved), and
+    external_repo_path operates on an existing repository in place.  All
+    three empty is the resume case — the existing workspace/repo is reused.
+    """
+    paper_url: str = ""
+    repo_url: str = ""
     workspace_dir: Path
     repo_cache_dir: Path | None = None
     task_id: str = Field(default_factory=_task_id)
@@ -44,6 +51,10 @@ class ReproTask(BaseModel):
     parent_run: dict | None = None
     env_namespace: str = ""
     isolate_env: bool = False
+    copy_from: str = ""
+    external_repo_path: str = ""
+    setup_only: bool = False
+    allow_code_delegation: bool = True
 
 
 class RepoContext(BaseModel):

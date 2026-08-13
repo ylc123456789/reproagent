@@ -1,8 +1,23 @@
 from pathlib import Path
 import subprocess
 
-from reproagent.repository.context import _is_usable_repo, clone_repo
+import pytest
+
+from reproagent.repository.context import _is_usable_repo, clone_repo, collect_context, setup_workspace
 from reproagent.models import ReproTask
+
+
+def _make_git_repo(path: Path, content: str = "hello") -> Path:
+    """Create a small real git repo (init + one commit)."""
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    (path / "README.md").write_text(content, encoding="utf-8")
+    subprocess.run(["git", "-C", str(path), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(path), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"],
+        check=True,
+    )
+    return path
 
 
 def test_rejects_half_cloned_git_dir(tmp_path):
@@ -78,3 +93,92 @@ def test_clone_repo_uses_existing_cache_when_network_clone_fails(tmp_path, monke
     assert repo_path == task.workspace_dir / "repo"
     assert (repo_path / "README.md").read_text(encoding="utf-8") == "from cache"
     assert not any(task.repo_url in cmd for cmd in calls)
+
+
+# ── workspace source modes (execution contract v1) ────────────────
+
+def test_setup_workspace_isolated_clones_url(tmp_path):
+    src = _make_git_repo(tmp_path / "upstream", content="upstream")
+    task = ReproTask(repo_url=str(src), workspace_dir=tmp_path / "ws")
+
+    repo = setup_workspace(task)
+
+    assert repo == tmp_path / "ws" / "repo"
+    assert (repo / "README.md").read_text(encoding="utf-8") == "upstream"
+
+
+def test_setup_workspace_copy_preserves_uncommitted_changes(tmp_path):
+    src = _make_git_repo(tmp_path / "src")
+    (src / "train.py").write_text("dirty change", encoding="utf-8")  # not committed
+
+    task = ReproTask(copy_from=str(src), workspace_dir=tmp_path / "ws")
+    repo = setup_workspace(task)
+
+    assert (repo / "train.py").read_text(encoding="utf-8") == "dirty change"
+    assert (repo / ".git").is_dir()  # history preserved
+
+
+def test_setup_workspace_shared_returns_external_in_place(tmp_path):
+    ext = _make_git_repo(tmp_path / "external")
+    task = ReproTask(external_repo_path=str(ext), workspace_dir=tmp_path / "ws")
+
+    repo = setup_workspace(task)
+
+    assert repo == ext.resolve()
+    assert not (tmp_path / "ws" / "repo").exists()  # never copied
+
+
+def test_setup_workspace_rejects_multiple_sources(tmp_path):
+    task = ReproTask(
+        repo_url="https://example.invalid/r.git", copy_from="/tmp/x",
+        workspace_dir=tmp_path / "ws",
+    )
+    with pytest.raises(ValueError, match="Exactly one repository source"):
+        setup_workspace(task)
+
+
+def test_setup_workspace_rejects_all_three_sources(tmp_path):
+    task = ReproTask(
+        repo_url="https://example.invalid/r.git", copy_from="/tmp/x",
+        external_repo_path="/tmp/y", workspace_dir=tmp_path / "ws",
+    )
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        setup_workspace(task)
+
+
+def test_setup_workspace_rejects_no_source_without_existing_repo(tmp_path):
+    task = ReproTask(workspace_dir=tmp_path / "ws")
+    with pytest.raises(ValueError, match="No repository source"):
+        setup_workspace(task)
+
+
+def test_setup_workspace_zero_sources_reuses_existing_workspace_repo(tmp_path):
+    ws = tmp_path / "ws"
+    repo = _make_git_repo(ws / "repo")
+    task = ReproTask(workspace_dir=ws)  # all three sources empty → resume
+
+    assert setup_workspace(task) == repo
+
+
+def test_setup_workspace_rejects_bad_copy_source(tmp_path):
+    task = ReproTask(copy_from=str(tmp_path / "missing"), workspace_dir=tmp_path / "ws")
+    with pytest.raises(ValueError, match="not a usable repository"):
+        setup_workspace(task)
+
+
+def test_setup_workspace_rejects_bad_external_repo(tmp_path):
+    task = ReproTask(external_repo_path=str(tmp_path / "missing"), workspace_dir=tmp_path / "ws")
+    with pytest.raises(ValueError, match="not a usable repository"):
+        setup_workspace(task)
+
+
+def test_collect_context_shared_writes_artifacts_to_own_workspace(tmp_path):
+    """Shared mode: repo not copied; summary/logs stay in the operator's workspace."""
+    ext = _make_git_repo(tmp_path / "external")
+    task = ReproTask(external_repo_path=str(ext), workspace_dir=tmp_path / "ws")
+
+    ctx = collect_context(task)
+
+    assert ctx.repo_path == ext.resolve()
+    assert (tmp_path / "ws" / "context" / "context_summary.md").exists()
+    assert not (tmp_path / "ws" / "repo").exists()

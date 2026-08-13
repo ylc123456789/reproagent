@@ -65,6 +65,10 @@ def resume_task(
         env_namespace=orig_task.get("env_namespace", ""),
         isolate_env=orig_task.get("isolate_env", False),
         parent_run=orig_task.get("parent_run"),
+        copy_from=orig_task.get("copy_from", ""),
+        external_repo_path=orig_task.get("external_repo_path", ""),
+        setup_only=orig_task.get("setup_only", False),
+        allow_code_delegation=orig_task.get("allow_code_delegation", True),
     )
     old_state = AgentState.model_validate(state_data)
     old_state.attempt_count = getattr(old_state, "attempt_count", 1) + 1

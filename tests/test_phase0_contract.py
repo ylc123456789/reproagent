@@ -72,6 +72,8 @@ def test_persisted_model_field_contracts(tmp_path) -> None:
         "config_path", "mirror_profile", "mirror_strict",
         "confirm_before_experiment", "dataset_cache_dir", "parent_run",
         "env_namespace", "isolate_env",
+        # experiment-operator contract v1 additions (deliberate schema change)
+        "copy_from", "external_repo_path", "setup_only", "allow_code_delegation",
     ]
     assert list(AgentState.model_fields) == [
         "task", "repo_context", "environment", "last_audit", "coding_results",

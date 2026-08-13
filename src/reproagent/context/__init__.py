@@ -7,6 +7,6 @@ package below shadows the old module, so the legacy public path
 here to stay compatible.
 """
 
-from ..repository.context import clone_repo, collect_context
+from ..repository.context import clone_repo, collect_context, setup_workspace
 
-__all__ = ["clone_repo", "collect_context"]
+__all__ = ["clone_repo", "collect_context", "setup_workspace"]

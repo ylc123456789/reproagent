@@ -49,9 +49,77 @@ def clone_repo(task: ReproTask) -> Path:
     raise RuntimeError(f"git clone failed after {CLONE_ATTEMPTS} attempts: {latest_error}")
 
 
+def setup_workspace(task: ReproTask) -> Path:
+    """Prepare the repository worktree for a task.
+
+    Exactly one repository source must be declared for a new task:
+    repo_url (isolated clone), copy_from (local worktree copy preserving
+    uncommitted changes), or external_repo_path (operate on an existing
+    repository in place).  All three empty is only valid when the
+    workspace already contains a usable repo (resume semantics).
+    Conflicts raise ValueError — never guess a precedence.
+    """
+    mode, source = _resolve_source_mode(task)
+    if mode == "isolated":
+        return clone_repo(task)
+    if mode == "copy":
+        return _copy_worktree(source, task)
+    if mode == "shared":
+        return _bind_external_repo(source)
+    return Path(source)  # resume: existing workspace/repo (validated above)
+
+
+def _resolve_source_mode(task: ReproTask) -> tuple[str, str]:
+    """Return (mode, source) for the task's single repository source."""
+    declared = [
+        ("isolated", task.repo_url, "repo_url"),
+        ("copy", task.copy_from, "copy_from"),
+        ("shared", task.external_repo_path, "external_repo_path"),
+    ]
+    given = [(mode, value, name) for mode, value, name in declared if value]
+    if len(given) > 1:
+        detail = ", ".join(f"{name}={value!r}" for _, value, name in given)
+        raise ValueError(
+            f"Exactly one repository source must be given, got {len(given)}: {detail}. "
+            "repo_url, copy_from, and external_repo_path are mutually exclusive."
+        )
+    if len(given) == 1:
+        mode, value, _ = given[0]
+        return mode, value
+    # zero sources — only resume semantics may reuse the existing workspace repo
+    repo_path = task.workspace_dir / "repo"
+    if _is_usable_repo(repo_path):
+        return "resume", str(repo_path)
+    raise ValueError(
+        "No repository source given: provide one of repo_url, copy_from, or "
+        "external_repo_path (all empty is only allowed when the workspace "
+        f"already contains a usable repo — {repo_path} does not)."
+    )
+
+
+def _copy_worktree(source: str, task: ReproTask) -> Path:
+    """Copy a local worktree into the task workspace, preserving uncommitted changes."""
+    src = Path(source).expanduser()
+    if not src.is_dir() or not _is_usable_repo(src):
+        raise ValueError(f"copy_from is not a usable repository worktree: {src}")
+    dst = task.workspace_dir / "repo"
+    if dst.exists():
+        _remove_path(dst)  # explicit source is authoritative for a fresh task
+    shutil.copytree(str(src), str(dst), symlinks=True)
+    return dst
+
+
+def _bind_external_repo(source: str) -> Path:
+    """Validate and return an existing repository to operate on in place."""
+    repo = Path(source).expanduser().resolve()
+    if not repo.is_dir() or not _is_usable_repo(repo):
+        raise ValueError(f"external_repo_path is not a usable repository: {repo}")
+    return repo
+
+
 def collect_context(task: ReproTask) -> RepoContext:
     """Collect repository, hardware, paper, and README context for planning."""
-    repo_path = clone_repo(task)
+    repo_path = setup_workspace(task)
     commit = _git_commit(repo_path)
     file_tree = _file_tree(repo_path, limit=500)
     readme_text = _read_readmes(repo_path)
