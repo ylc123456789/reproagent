@@ -185,3 +185,92 @@ def test_resume_cli_accepts_args(tmp_path):
     assert r.returncode == 0
     assert "workspace" in r.stdout
     assert "--instruction" in r.stdout
+
+
+# ── R6: execution contract v1 bindings sub-schema ─────────────────
+
+def test_bindings_repo_and_environment_sections(tmp_path):
+    """Card bindings follow the contract: repo{path,origin,commit,mode}
+    and environment{name,policy,certification,certified_at,audit_artifact}."""
+    from reproagent.models import AgentState, EnvironmentAudit, EnvironmentInfo, RepoContext
+    from reproagent.session import _read_yaml
+
+    task = ReproTask(repo_url="https://example.invalid/org/repo.git", workspace_dir=tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    audit_out = tmp_path / "logs" / "environment_audit.stdout"
+    audit_out.parent.mkdir()
+    audit_out.write_text("ok", encoding="utf-8")
+    state = AgentState(
+        task=task,
+        repo_context=RepoContext(repo_path=repo, commit_hash="abc1234"),
+        environment=EnvironmentInfo(env_name="resenv_x", created=True),
+        last_audit=EnvironmentAudit(success=True, summary="passed", stdout_path=audit_out),
+        status="completed",
+        final_summary="done",
+    )
+    write_session_card(state)
+
+    card = _read_yaml(tmp_path / "session.yaml")
+    repo_binding = card["bindings"]["repo"]
+    assert repo_binding["path"] == str(repo)
+    assert repo_binding["origin"] == "https://example.invalid/org/repo.git"
+    assert repo_binding["commit"] == "abc1234"
+    assert repo_binding["mode"] == "isolated"
+    env_binding = card["bindings"]["environment"]
+    assert env_binding["name"] == "resenv_x"
+    assert env_binding["policy"] == "auto"
+    assert env_binding["certification"] == "experiment"
+    assert env_binding["certified_at"]
+    assert env_binding["audit_artifact"] == "logs/environment_audit.stdout"
+    # legacy flat keys stay for backward compatibility
+    assert card["bindings"]["conda_env"] == "resenv_x"
+
+
+def test_bindings_certification_none_without_audit(tmp_path):
+    from reproagent.models import AgentState, EnvironmentInfo, RepoContext
+    from reproagent.session import _read_yaml
+
+    task = ReproTask(repo_url="r", workspace_dir=tmp_path)
+    state = AgentState(
+        task=task,
+        repo_context=RepoContext(repo_path=tmp_path / "repo"),
+        environment=EnvironmentInfo(env_name="resenv_y", created=True),
+        status="completed",
+    )
+    write_session_card(state)
+
+    env_binding = _read_yaml(tmp_path / "session.yaml")["bindings"]["environment"]
+    assert env_binding["certification"] == "none"
+    assert "certified_at" not in env_binding
+    assert "audit_artifact" not in env_binding
+
+
+def test_bindings_shared_mode_reports_shared_and_local_origin(tmp_path):
+    from reproagent.models import AgentState, RepoContext
+    from reproagent.session import _read_yaml
+
+    external = tmp_path / "project" / "repos" / "foo"
+    external.mkdir(parents=True)
+    task = ReproTask(external_repo_path=str(external), workspace_dir=tmp_path / "ws")
+    state = AgentState(
+        task=task,
+        repo_context=RepoContext(repo_path=external),
+        status="completed",
+    )
+    write_session_card(state)
+
+    repo_binding = _read_yaml(tmp_path / "ws" / "session.yaml")["bindings"]["repo"]
+    assert repo_binding["mode"] == "shared"
+    assert repo_binding["origin"] == "local"
+    assert repo_binding["path"] == str(external)
+
+
+def test_session_status_tolerates_legacy_card_without_bindings(tmp_path):
+    (tmp_path / "session.yaml").write_text(
+        "schema_version: 1\nsession_id: old-1\nmodule: reproagent\n"
+        "kind: task_session\nstatus: completed\n",
+        encoding="utf-8",
+    )
+    info = session_status(tmp_path)
+    assert info["session"]["session_id"] == "old-1"

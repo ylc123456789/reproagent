@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .models import AgentState
+from .repository.context import workspace_mode
 
 
 # ── write ──────────────────────────────────────────────────────────
@@ -40,6 +41,35 @@ def write_session_card(state: AgentState, *, created_at: str | None = None, **ex
             created_at = now
 
     bindings = {"conda_env": state.environment.env_name if state.environment else ""}
+    # Execution contract v1 bindings sub-schema (additive — the flat keys
+    # above stay for backward compatibility; readers tolerate absence).
+    mode = workspace_mode(state.task)
+    if state.repo_context is not None and mode != "resume":
+        bindings["repo"] = {
+            "path": str(state.repo_context.repo_path),
+            "origin": state.task.repo_url or "local",
+            "commit": state.repo_context.commit_hash or "",
+            "mode": mode,
+        }
+    if state.environment is not None:
+        audit = state.last_audit
+        audit_path = audit.stdout_path if audit else None
+        artifact = audit_path if audit_path is not None and audit_path.exists() else None
+        # Experiment certification requires a passing audit AND its log
+        # artifact (contract: certified_at + audit_artifact both present).
+        certification = "experiment" if (audit and audit.success and artifact) else "none"
+        env_binding = {
+            "name": state.environment.env_name,
+            "policy": "auto",
+            "certification": certification,
+        }
+        if certification == "experiment":
+            env_binding["certified_at"] = now
+            try:
+                env_binding["audit_artifact"] = str(artifact.relative_to(ws))
+            except ValueError:
+                env_binding["audit_artifact"] = str(artifact)
+        bindings["environment"] = env_binding
     if state.task.dataset_cache_dir:
         bindings["dataset_cache"] = state.task.dataset_cache_dir
     bindings.update(extra_bindings)
