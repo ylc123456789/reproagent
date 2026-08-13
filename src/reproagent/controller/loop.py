@@ -146,10 +146,15 @@ def run_controller(task: ReproTask, *, resume_state: AgentState | None = None) -
     if task.dataset_cache_dir:
         try:
             from ..runtime.dataset_cache import prepare_dataset_links
+            # Shared mode operates on an external repo: symlinks may only be
+            # created inside that repo (never beside it).  Isolated/copy modes
+            # own the whole task workspace.
+            allowed_root = repo_context.repo_path if task.external_repo_path else task.workspace_dir
             state.dataset_links = prepare_dataset_links(
                 repo_path=repo_context.repo_path,
                 workspace_dir=task.workspace_dir,
                 cache_root=task.dataset_cache_dir,
+                allowed_write_root=allowed_root,
             )
             created = sum(1 for r in state.dataset_links if r.get("link") == "created")
             _log(f"dataset cache: {len(state.dataset_links)} root(s) detected, "

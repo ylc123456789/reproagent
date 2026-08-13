@@ -146,6 +146,35 @@ def test_prepare_never_clobbers_existing_dir(tmp_path):
     assert (real_data / "keep.txt").exists()  # untouched
 
 
+def test_prepare_skips_links_outside_allowed_write_root(tmp_path):
+    """Shared mode: repo lives outside the workspace. Links inside the repo
+    are allowed; sibling links ('../data') are skipped and reported."""
+    ext = tmp_path / "project" / "repos" / "foo"
+    ext.mkdir(parents=True)
+    (ext / "train.py").write_text(
+        "datasets.MNIST('../data', download=True)\n"
+        "datasets.CIFAR10(root='./data', download=True)\n",
+        encoding="utf-8",
+    )
+    cache = _make_cache(tmp_path, ["MNIST/raw/x"])
+    task = ReproTask(paper_url="p", repo_url="r",
+                     workspace_dir=tmp_path / "ws", dataset_cache_dir=str(cache))
+
+    refs = prepare_dataset_links(
+        repo_path=ext, workspace_dir=tmp_path / "ws", cache_root=str(cache),
+        allowed_write_root=ext,  # shared mode root
+    )
+
+    by_declared = {r["declared"]: r for r in refs}
+    assert by_declared["../data"]["link"] == "outside_write_root"
+    assert not (tmp_path / "project" / "repos" / "data").exists()  # sibling never linked
+    assert by_declared["./data"]["link"] == "created"
+    assert (ext / "data").is_symlink()
+
+    block = render_dataset_block(task, ext, refs)
+    assert "outside the allowed write root" in block
+
+
 # ── prompt rendering ────────────────────────────────────────────────────────
 
 def test_render_block_shows_absolute_paths(tmp_path):

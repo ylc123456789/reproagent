@@ -128,11 +128,17 @@ def prepare_dataset_links(
     repo_path: Path,
     workspace_dir: Path,
     cache_root: str,
+    allowed_write_root: Path | None = None,
 ) -> list[dict]:
     """Scan, resolve, and pre-create symlinks into the dataset cache.
 
-    Returns the annotated ref list (also persisted on AgentState.dataset_links
-    and rendered into prompts). Never raises — cache bridging is best-effort.
+    allowed_write_root restricts where symlinks may be created: resolved
+    paths outside it are skipped and reported instead of linked (shared
+    mode operates on an external repo — never create links beside it).
+    When None, the historical behaviour (any path inside repo_path.parent)
+    is kept. Returns the annotated ref list (also persisted on
+    AgentState.dataset_links and rendered into prompts). Never raises —
+    cache bridging is best-effort.
     """
     refs = scan_dataset_roots(repo_path)
     if not cache_root:
@@ -146,10 +152,19 @@ def prepare_dataset_links(
             r.update(link="no_cache", cache_hit=None)
         return refs
 
+    write_root = Path(allowed_write_root).resolve() if allowed_write_root is not None else None
+
     linked_paths: set[str] = set()
     for r in refs:
         resolved = Path(r["resolved"])
         r["cache_hit"] = _cache_hit(cache, r["dataset"])
+
+        if write_root is not None:
+            try:
+                resolved.relative_to(write_root)
+            except ValueError:
+                r["link"] = "outside_write_root"  # escapes the allowed root — never link
+                continue
 
         if str(resolved) in linked_paths:
             r["link"] = "created"      # another ref already linked this path
@@ -206,6 +221,8 @@ def render_dataset_block(task, repo_path: Path | None, links: list[dict]) -> str
             lines.append("    symlink: path already exists (left as-is)")
         elif r.get("link") == "no_cache":
             lines.append("    symlink: none (cache unavailable)")
+        elif r.get("link") == "outside_write_root":
+            lines.append("    symlink: skipped (resolves outside the allowed write root — no link created)")
         if r.get("cache_hit") is True:
             lines.append("    cache: HIT — do NOT re-download; `download=True` will no-op.")
         elif r.get("cache_hit") is False:
