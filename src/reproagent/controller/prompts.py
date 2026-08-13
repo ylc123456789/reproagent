@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from ..context.policy import ContextPolicy
 from ..models import AgentObservation, AgentState, EnvironmentInfo, RepoContext, ReproTask
+from ..repository.context import workspace_mode
 
 SYSTEM_PROMPT = """\
-You are a machine-learning reproducibility engineer. Your task: reproduce a paper experiment inside a prepared conda environment.
+You are an experiment operator for machine-learning research repositories. You work inside a prepared conda environment: probe the repository, install dependencies, run experiments, and collect metric evidence from log files. When a paper is provided, your goal is reproducing its experiment; otherwise your goal is exactly the experiment goal given to you.
 
 ## How to work
 
@@ -78,7 +79,7 @@ Format:
   ## Summary — one paragraph, what happened
   ## Metrics — table: each goal requirement, [MET]/[NOT MET]/[UNCERTAIN], actual value,
     and which log file the evidence comes from
-  ## Deviations — how the experiment differed from the paper/goal setup
+  ## Deviations — how the experiment differed from the goal (and from the paper setup when reproducing)
   ## Data Index — every log file path and what it contains
   ## Next Steps — what a human should do next
 """
@@ -96,8 +97,9 @@ def build_initial_context(task: ReproTask, repo_context: RepoContext, environmen
     dataset_block = render_dataset_block(task, repo_context.repo_path, dataset_links or [])
     return f"""## Task
 
-Paper: {task.paper_url}
-Repo: {task.repo_url} (cloned at {repo_context.repo_path}, commit {repo_context.commit_hash or 'unknown'})
+Paper: {task.paper_url or 'not provided'}
+{_source_line(task)}
+Workspace: {repo_context.repo_path} (mode: {workspace_mode(task)}, commit {repo_context.commit_hash or 'unknown'})
 Experiment goal: {task.experiment_goal}
 Timeout: {task.timeout_seconds}s per command batch
 Max steps: {task.max_steps}
@@ -190,6 +192,28 @@ def build_turn_prompt(state: AgentState, policy: ContextPolicy) -> str:
 
 
 # ── helpers ──────────────────────────────────────────────────────
+
+def _source_line(task: ReproTask) -> str:
+    """One-line description of where the workspace came from."""
+    if task.repo_url:
+        return f"Source: {task.repo_url} (cloned)"
+    if task.copy_from:
+        return f"Source: local worktree copy of {task.copy_from}"
+    if task.external_repo_path:
+        return f"Source: {task.external_repo_path} (shared — operated in place)"
+    return "Source: existing workspace repository (resume)"
+
+
+SETUP_ONLY_DIRECTIVE = """
+
+## Setup-only task
+
+This is an environment-provisioning task. Install dependencies
+(environment.yml/requirements.txt/pyproject.toml as needed, aligned with the
+mirror policy and GPU capability), then run audit_env, and finish with a
+summary of the prepared environment. Do NOT run any experiment, training,
+evaluation, or benchmark commands — stage_hint must never be "experiment"."""
+
 
 def _env_line(env: EnvironmentInfo) -> str:
     if env.created:

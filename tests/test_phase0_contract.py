@@ -59,8 +59,10 @@ def test_prompt_contracts() -> None:
         file_tree="README.md", readme_text="Phase 0 README", hardware_text="CPU test",
     )
     rendered = build_initial_context(task, repo, EnvironmentInfo(env_name="phase0", created=True))
-    assert _sha256(SYSTEM_PROMPT) == "f79538efb77bf01656dcdbe2315506d08091cc8cd08cd1832fad226edfd39a2a"
-    assert _sha256(rendered) == "2f22ea512be045e406479ae55b2bff027eae99af677539089714a6cedc07d8d3"
+    # Deliberate behavior change (experiment-operator redesign O4):
+    # system prompt repositioned as operator + workspace source line added.
+    assert _sha256(SYSTEM_PROMPT) == "ab000e139bcbe17ba3a46bab53a77dd2ec1e42075b21457403dc4f5737cb5ab6"
+    assert _sha256(rendered) == "6e7189958b82342b63f92af19384d7aed115565ba7121e28ee5b1b1cccc70952"
 
 
 def test_persisted_model_field_contracts(tmp_path) -> None:

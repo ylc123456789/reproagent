@@ -69,6 +69,17 @@ def setup_workspace(task: ReproTask) -> Path:
     return Path(source)  # resume: existing workspace/repo (validated above)
 
 
+def workspace_mode(task: ReproTask) -> str:
+    """Derive the workspace mode from the task's source fields (no validation)."""
+    if task.external_repo_path:
+        return "shared"
+    if task.copy_from:
+        return "copy"
+    if task.repo_url:
+        return "isolated"
+    return "resume"
+
+
 def _resolve_source_mode(task: ReproTask) -> tuple[str, str]:
     """Return (mode, source) for the task's single repository source."""
     declared = [

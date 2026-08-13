@@ -87,6 +87,14 @@ def _tool_run_commands(action: AgentAction, state: AgentState) -> AgentObservati
             stage_hint=action.stage_hint,
             error="no commands provided",
         )
+    if state.task.setup_only and action.stage_hint == "experiment":
+        return AgentObservation(
+            step=len(state.steps) + 1,
+            action=action.action,
+            stage_hint=action.stage_hint,
+            error="setup_only task: experiment commands are not allowed — "
+                  "prepare the environment and call finish",
+        )
     if (state.task.confirm_before_experiment and action.stage_hint == "experiment"
             and not _confirm_experiment(commands)):
         return AgentObservation(

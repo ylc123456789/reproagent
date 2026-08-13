@@ -35,7 +35,7 @@ from .actions import (
     _tool_run_commands,
     _update_file_cache,
 )
-from .prompts import SYSTEM_PROMPT, build_initial_context, build_turn_prompt
+from .prompts import SETUP_ONLY_DIRECTIVE, SYSTEM_PROMPT, build_initial_context, build_turn_prompt
 
 
 def _log(message: str) -> None:
@@ -172,6 +172,8 @@ def run_controller(task: ReproTask, *, resume_state: AgentState | None = None) -
                                                 dataset_links=state.dataset_links)
         else:
             user_prompt = build_turn_prompt(state, policy)
+        if task.setup_only:
+            user_prompt += SETUP_ONLY_DIRECTIVE
 
         try:
             raw = call_llm(task, SYSTEM_PROMPT, user_prompt,
@@ -205,6 +207,8 @@ def run_controller(task: ReproTask, *, resume_state: AgentState | None = None) -
         else:  # finish
             state.status = action.finish_status or "completed"
             state.final_summary = action.finish_summary
+            if task.setup_only:
+                state.final_summary += _provisioning_summary(state)
             _log(f"finish: {state.status}")
             break
 
@@ -222,6 +226,8 @@ def run_controller(task: ReproTask, *, resume_state: AgentState | None = None) -
             user_prompt += "\n\nStep budget exhausted. The run ends here. Write a brief final summary."
             final_raw = call_llm(task, SYSTEM_PROMPT, user_prompt, trace_label="force_finish")
             state.final_summary = final_raw[:5000]
+            if task.setup_only:
+                state.final_summary += _provisioning_summary(state)
 
     # ── write report ──────────────────────────────────────────
     result_path = write_agent_result(state, version)
@@ -247,3 +253,19 @@ def ensure_environment_for_controller(task: ReproTask):
         repo_context=RepoContext(repo_path=task.workspace_dir / "repo"),
     )
     return ensure_environment(env_state)  # type: ignore[arg-type]
+
+
+def _provisioning_summary(state: AgentState) -> str:
+    """Deterministic environment summary appended to setup_only reports."""
+    lines = ["\n\n## Environment Provisioning"]
+    env = state.environment
+    if env is None:
+        return "\n".join(lines + ["- No environment prepared."])
+    lines.append(f"- Conda env: {env.env_name} ({'created this run' if env.created else 'reused'})")
+    audit = state.last_audit
+    if audit is None:
+        lines.append("- Audit: not run.")
+    else:
+        lines.append(f"- Audit: {'PASSED' if audit.success else 'FAILED'} — {audit.summary}")
+        lines.extend(f"  - {detail}" for detail in (audit.details or []))
+    return "\n".join(lines)
