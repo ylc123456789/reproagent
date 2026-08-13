@@ -2,15 +2,20 @@
 
 ## 1. Purpose
 
-`reproagent` is a small LLM-first reproduction runner for machine learning projects.
+`reproagent` is the experiment operator: an LLM-driven runner for machine-learning
+research repositories. Reproduction is one of its modes — when a paper is given,
+the goal is reproducing that paper; otherwise the goal is the experiment goal
+exactly as specified.
 
 Input:
 
 ```text
-paper_url
-repo_url
-workspace_dir
-experiment_goal
+experiment_goal                 (always)
+workspace_dir                   (always — session workspace, always private)
+one of: repo_url                → isolated mode (clone into the workspace)
+        copy_from               → copy mode (local worktree copy, uncommitted changes kept)
+        external_repo_path      → shared mode (operate on an existing repo in place)
+setup_only (optional)           → provision the environment, no experiments
 ```
 
 Output:
@@ -18,7 +23,7 @@ Output:
 ```text
 result.md
 state.json
-session.yaml
+session.yaml        (with execution-contract bindings: repo/environment/caches)
 logs/
 patches/
 ```
@@ -51,7 +56,8 @@ src/reproagent/
     dataset_cache.py           # scan hardcoded dataset roots, resolve to absolute
                                # paths, pre-create symlinks into the shared cache
   repository/
-    context.py                 # clone repo and collect README/file-tree/hardware
+    context.py                 # workspace setup (isolated/copy/shared/resume),
+                               # clone, and README/file-tree/hardware collection
   context/
     policy.py                  # context budget policy scaled to model window
   integrations/
@@ -111,10 +117,12 @@ what to do next based on the current state.
 
 ```
 initialize:
-  → clone repo
+  → setup the workspace (isolated clone / copy worktree / bind external repo)
   → create conda env
   → collect hardware / file-tree / README context
-  → bridge hardcoded dataset roots into the shared cache (best-effort)
+  → bridge hardcoded dataset roots into the shared cache (best-effort,
+    bounded by the allowed write root: task workspace, or the external
+    repo itself in shared mode)
 
 loop (max N steps):
   → build prompt from current state (compacted history + file cache)
@@ -194,14 +202,24 @@ from reproagent import ReproTask, ReproState, CommandPlan, CommandResult
 from reproagent.controller import run_controller   # loop with full finalization
 from reproagent.agent import run_task, resume_task  # CLI-facing wrappers
 
-state = run_task(ReproTask(...))
+# isolated / copy / shared — exactly one repository source:
+state = run_task(ReproTask(repo_url="https://...", workspace_dir=...))
+state = run_task(ReproTask(copy_from="/local/worktree", workspace_dir=...))
+state = run_task(ReproTask(external_repo_path="/shared/repo", workspace_dir=...))
+# environment provisioning only:
+state = run_task(ReproTask(repo_url="...", workspace_dir=..., setup_only=True))
 state = resume_task(Path("/path/to/workspace"), "continue with 5 epochs")
 ```
+
+`allow_code_delegation=False` (default True) disables the internal
+call_coding_agent delegation: the run exits `blocked` with the coding
+issues listed so the orchestrator can route a CodingAgent task and resume.
 
 CLI:
 
 ```text
-reproagent run       --paper ... --repo ... --workspace ... --experiment-goal ...
+reproagent run       --repo ... | --copy-from ... | --external-repo ...
+                     --workspace ... --experiment-goal ... [--setup-only]
 reproagent resume    <workspace> --instruction ...
 reproagent list      --root <dir>
 reproagent status    <workspace>
@@ -217,7 +235,20 @@ result.md          # final human-readable report
 session.yaml       # session index card (status, bindings, key artifacts)
 logs/              # per-command stdout/stderr, conda setup, audit, LLM traces
 patches/           # CodingAgent patch outputs
-repo/              # cloned repository (cwd for all commands)
+repo/              # repository worktree (cwd for all commands; shared mode
+                   # points at the external repo instead)
+```
+
+session.yaml `bindings` follows the execution-contract v1 sub-schema
+(additive over the legacy flat keys conda_env/dataset_cache/pip_cache):
+
+```yaml
+bindings:
+  repo: {path, origin, commit, mode}          # mode: isolated|copy|shared
+  environment: {name, policy, certification}  # certification: experiment
+    #   + certified_at + audit_artifact when the audit passed
+  dataset_cache: /path
+  pip_cache: /path
 ```
 
 Resume semantics: same `task_id` → same conda env; steps are appended to the
