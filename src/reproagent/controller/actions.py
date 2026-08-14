@@ -31,14 +31,21 @@ def _not_setup_allowed(commands: list[str]) -> list[str]:
 
 
 _ENV_MUTATING_RE = re.compile(
-    r"^(?:python\d?(?:\.\d+)? -m )?pip\d?(?:\.\d+)? (?:install|uninstall|upgrade)\b"
-    r"|^conda (?:install|remove|update|uninstall)\b"
+    # pip family (plain or python -m), anywhere in the string — a compound
+    # command like "echo ok && pip install x" must invalidate too
+    r"(?:^|[\s;&|])(?:(?:python\d?(?:\.\d+)?) -m )?pip\d?(?:\.\d+)? (?:install|uninstall|upgrade)\b"
+    # conda family and its mamba equivalents, including env update
+    r"|(?:^|[\s;&|])(?:conda|mamba|micromamba) (?:install|remove|update|uninstall)\b"
+    r"|(?:^|[\s;&|])(?:conda|mamba|micromamba) env update\b"
+    # other package managers that mutate the current environment
+    r"|(?:^|[\s;&|])uv pip (?:install|uninstall)\b"
+    r"|(?:^|[\s;&|])poetry (?:add|remove|install|update)\b"
 )
 
 
 def _is_env_mutating_command(command: str) -> bool:
     """Whether the command changes installed packages (invalidates the audit)."""
-    return bool(_ENV_MUTATING_RE.match(command.strip().lower()))
+    return bool(_ENV_MUTATING_RE.search(command.strip().lower()))
 
 
 def _parse_action(text: str) -> AgentAction | None:

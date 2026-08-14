@@ -213,27 +213,75 @@ def test_certification_gate_blocks_inline_python_before_audit(tmp_path):
 
 def test_env_mutating_command_invalidates_audit(tmp_path, monkeypatch):
     """A successful audit goes stale after a dependency change."""
+    import pytest
+
     import reproagent.controller.actions as actions_module
     from reproagent.models import CommandResult, EnvironmentAudit
 
+    mutating = [
+        "pip install torch", "python -m pip install torch", "conda install pytorch",
+        "conda env update -f environment.yml", "echo ok && pip install torch",
+        "pip uninstall torch", "uv pip install x", "poetry add x",
+    ]
+    for command in mutating:
+        task = ReproTask(repo_url="repo", workspace_dir=tmp_path, mock_llm=True)
+        state = AgentState(
+            task=task,
+            last_audit=EnvironmentAudit(success=True, summary="passed"),
+        )
+        dummy = CommandResult(
+            command=command, exit_code=0,
+            stdout_path=tmp_path / "o", stderr_path=tmp_path / "e", duration_seconds=0.0,
+        )
+        monkeypatch.setattr(actions_module, "_mock_run_commands", lambda commands, state: [dummy])
+
+        action = AgentAction(
+            thinking="install", action="run_commands", stage_hint="environment",
+            commands=[command],
+        )
+        _tool_run_commands(action, state)
+
+        assert state.last_audit is None, command
+
+
+def test_non_mutating_command_keeps_audit(tmp_path, monkeypatch):
+    """Inspection and non-install pip commands do not invalidate the audit."""
+    import reproagent.controller.actions as actions_module
+    from reproagent.models import CommandResult, EnvironmentAudit
+
+    for command in ("pip show torch", "pip list", "echo ok", "head -20 README.md"):
+        task = ReproTask(repo_url="repo", workspace_dir=tmp_path, mock_llm=True)
+        state = AgentState(
+            task=task,
+            last_audit=EnvironmentAudit(success=True, summary="passed"),
+        )
+        dummy = CommandResult(
+            command=command, exit_code=0,
+            stdout_path=tmp_path / "o", stderr_path=tmp_path / "e", duration_seconds=0.0,
+        )
+        monkeypatch.setattr(actions_module, "_mock_run_commands", lambda commands, state: [dummy])
+
+        _tool_run_commands(
+            AgentAction(thinking="c", action="run_commands", stage_hint="probe",
+                        commands=[command]),
+            state,
+        )
+        assert state.last_audit is not None, command
+
+
+def test_certification_gate_rejects_compound_before_audit(tmp_path):
+    """Compound commands are blocked pre-audit (not just the first word)."""
     task = ReproTask(repo_url="repo", workspace_dir=tmp_path, mock_llm=True)
-    state = AgentState(
-        task=task,
-        last_audit=EnvironmentAudit(success=True, summary="passed"),
-    )
-    dummy = CommandResult(
-        command="pip install torch", exit_code=0,
-        stdout_path=tmp_path / "o", stderr_path=tmp_path / "e", duration_seconds=0.0,
-    )
-    monkeypatch.setattr(actions_module, "_mock_run_commands", lambda commands, state: [dummy])
-
-    action = AgentAction(
-        thinking="install", action="run_commands", stage_hint="environment",
-        commands=["pip install torch"],
-    )
-    _tool_run_commands(action, state)
-
-    assert state.last_audit is None
+    state = AgentState(task=task)
+    for command in ("echo ok && python train.py", "pip install x && python train.py",
+                    "echo ok && pip install x"):
+        observation = _tool_run_commands(
+            AgentAction(thinking="try", action="run_commands", stage_hint="environment",
+                        commands=[command]),
+            state,
+        )
+        assert not observation.command_results, command
+        assert "not yet certified" in observation.error
 
 
 def test_stale_audit_blocks_experiment_until_re_audit(tmp_path, monkeypatch):

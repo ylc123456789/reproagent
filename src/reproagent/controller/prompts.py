@@ -236,9 +236,11 @@ mirror policy and GPU capability), then run audit_env, and finish with a
 summary of the prepared environment.
 
 The runner enforces a deterministic command whitelist (independent of
-stage_hint): only package installation (pip), inspection (ls/cat/grep/
-head/tail/find/rg/sed/wc/pwd/which), --help probes, python -m py_compile,
-and setup chores (git/mkdir/cp/mv/ln/wget/curl/echo) are allowed. Direct
+stage_hint): only package installation (pip / conda install / conda env
+update), inspection (ls/cat/grep/head/tail/find/rg/sed/wc/pwd/which),
+--help probes, python -m py_compile, and setup chores (git/mkdir/cp/mv/
+ln/wget/curl/echo) are allowed. Compound shell commands (&&, ||, ;, |,
+$(), newlines) are rejected — exactly one command per list item. Direct
 script or module execution (python *.py, ./run.sh, bash x.sh, make ...)
 and arbitrary python -c inline programs are blocked — experiments cannot
 run here. Import/version probing is done via the audit_env tool.

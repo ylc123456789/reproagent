@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -60,6 +61,18 @@ _SETUP_ALLOWED_FIRST_WORDS = {
     "echo",
 }
 
+_SHELL_CONTROL_RE = re.compile(r"&&|\|\||;|\||\n|\r|\$\(|`")
+
+
+def _has_shell_control(command: str) -> bool:
+    """Whether the command contains shell control operators.
+
+    Compound commands (&&, ||, ;, pipelines, command substitution,
+    newlines) are rejected by the setup/pre-audit policy: exactly one
+    command per list item, because run_commands already accepts a list.
+    """
+    return bool(_SHELL_CONTROL_RE.search(command))
+
 
 def _is_setup_command(command: str) -> bool:
     """Return whether a command is allowed during provisioning / pre-audit.
@@ -69,11 +82,16 @@ def _is_setup_command(command: str) -> bool:
     module execution (python train.py, ./run.sh, bash x.sh, make ...) never
     does, so experiments cannot run in setup_only mode.
 
+    Compound shell commands are rejected before anything else — an unsafe
+    command chained after --help or pip must not sneak through.
+
     Arbitrary inline Python (`python -c ...`) is deliberately REJECTED:
     an experiment can be embedded in it and would bypass the whitelist.
     Import/version probing is available through the audit_env tool.
     """
     lowered = command.strip().lower()
+    if _has_shell_control(command):
+        return False
     if "--help" in lowered or lowered.endswith(" -h") or " -h " in lowered:
         return True
     if lowered.startswith(("python -m pip ", "python3 -m pip ",
@@ -83,6 +101,9 @@ def _is_setup_command(command: str) -> bool:
         return True
     if lowered.startswith(("python -c ", "python3 -c ")):
         return False
+    if lowered.startswith(("conda install ", "conda env update ", "conda remove ",
+                           "conda update ", "conda uninstall ")):
+        return True
     first = lowered.split()[0] if lowered.split() else ""
     return first in _SETUP_ALLOWED_FIRST_WORDS
 

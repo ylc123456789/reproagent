@@ -224,6 +224,23 @@ def test_setup_stage_blocks_inline_python():
         assert not ok, cmd
 
 
+def test_setup_stage_allows_conda_provisioning():
+    """conda provisioning (install / env update) is allowed in setup mode."""
+    for cmd in ("conda install pytorch", "conda env update -f environment.yml"):
+        ok, reason = is_safe_command(cmd, stage="setup")
+        assert ok, f"{cmd}: {reason}"
+
+
+def test_setup_stage_rejects_compound_commands():
+    """Shell control operators are rejected — one command per list item."""
+    for cmd in ("echo ok && python train.py", "pip install x && python train.py",
+                "echo ok && pip install x", "python train.py --help && echo x",
+                "a | b", "a; b", "a || b", "echo $(whoami)", "echo `whoami`",
+                "a\nb"):
+        ok, reason = is_safe_command(cmd, stage="setup")
+        assert not ok, cmd
+
+
 def test_setup_stage_blocks_script_execution():
     """Deterministic: no script/module execution regardless of LLM labels."""
     for cmd in ("python train.py", "python3 main.py --epochs 10", "bash run.sh",
