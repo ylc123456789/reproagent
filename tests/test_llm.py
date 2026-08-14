@@ -1,5 +1,5 @@
 from reproagent.llm import _chat_completions_url
-from reproagent.prompts import SYSTEM_PROMPT, build_initial_context
+from reproagent.controller.prompts import SYSTEM_PROMPT, build_initial_context
 from reproagent.models import EnvironmentInfo, RepoContext, ReproTask
 
 

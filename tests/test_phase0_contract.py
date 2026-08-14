@@ -9,7 +9,7 @@ from pathlib import Path
 import reproagent
 from reproagent.main import build_parser
 from reproagent.models import AgentState, EnvironmentInfo, RepoContext, ReproTask
-from reproagent.prompts import SYSTEM_PROMPT, build_initial_context
+from reproagent.controller.prompts import SYSTEM_PROMPT, build_initial_context
 
 
 def _sha256(text: str) -> str:

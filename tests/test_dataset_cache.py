@@ -204,7 +204,7 @@ def test_turn_prompt_carries_cwd_and_dataset_block(tmp_path):
     """Every rebuilt turn prompt must re-state the absolute cwd and mapping."""
     from reproagent.context.policy import ContextPolicy
     from reproagent.models import AgentState, RepoContext
-    from reproagent.prompts import build_turn_prompt
+    from reproagent.controller.prompts import build_turn_prompt
 
     repo = _make_repo(tmp_path, {
         "mnist/main.py": "datasets.MNIST('../data', download=True)\n",
