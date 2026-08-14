@@ -343,3 +343,45 @@ def test_key_artifacts_register_existing_evidence(tmp_path):
     # every registered path exists on disk
     for artifact in artifacts:
         assert (tmp_path / artifact["path"]).exists(), artifact["path"]
+
+
+def test_key_artifacts_prioritize_experiment_evidence(tmp_path):
+    """A long setup/probe phase must not crowd the primary experiment log
+    out of the capped key_artifacts list."""
+    from reproagent.models import AgentObservation, AgentState, CommandResult, RepoContext
+    from reproagent.session import _read_yaml
+
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (tmp_path / "result.md").write_text("# result", encoding="utf-8")
+
+    def make_step(step: int, stage: str, count: int) -> AgentObservation:
+        results = []
+        for i in range(count):
+            out = logs / f"{stage}_{step:02d}_{i:02d}.stdout"
+            out.write_text(f"{stage} log", encoding="utf-8")
+            results.append(CommandResult(
+                command=f"{stage} cmd {i}", exit_code=0,
+                stdout_path=out, stderr_path=logs / f"{stage}_{step:02d}_{i:02d}.stderr",
+                duration_seconds=0.1,
+            ))
+        return AgentObservation(step=step, action="run_commands", stage_hint=stage,
+                                command_results=results)
+
+    steps = []
+    for i in range(7):
+        steps.append(make_step(i + 1, "environment", 2))  # 14 probe logs fill the cap
+    steps.append(make_step(8, "experiment", 1))           # the primary evidence
+
+    state = AgentState(
+        task=ReproTask(repo_url="r", workspace_dir=tmp_path),
+        repo_context=RepoContext(repo_path=tmp_path / "repo"),
+        status="completed",
+        steps=steps,
+    )
+    write_session_card(state)
+
+    artifacts = _read_yaml(tmp_path / "session.yaml")["key_artifacts"]
+    experiment_paths = [a["path"] for a in artifacts
+                        if "experiment_08" in a["path"]]
+    assert experiment_paths, "primary experiment log was dropped by the cap"

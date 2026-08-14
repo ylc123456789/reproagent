@@ -134,10 +134,21 @@ def _is_transient_conda_setup_error(stderr: str) -> bool:
 
 
 
+def conda_run_flag(env_ref: str) -> str:
+    """Return the conda run flag for an environment reference.
+
+    One documented rule: absolute paths are conda PREFIXES (`-p`);
+    everything else is a NAME (`-n`). Shared by command execution, the
+    environment audit, and CodingAgent verification wrapping.
+    """
+    return "-p" if Path(env_ref).expanduser().is_absolute() else "-n"
+
+
 def build_backend_command(env_name: str, command: str, conda: str | None = None) -> list[str]:
     """Wrap a plain shell command so it runs inside the task conda env."""
     conda_exe = conda or find_conda() or "conda"
-    return [conda_exe, "run", "--no-capture-output", "-n", env_name, "bash", "-o", "pipefail", "-c", command]
+    return [conda_exe, "run", "--no-capture-output", conda_run_flag(env_name), env_name,
+            "bash", "-o", "pipefail", "-c", command]
 
 
 def find_conda() -> str | None:

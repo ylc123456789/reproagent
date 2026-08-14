@@ -19,7 +19,7 @@ from pathlib import Path
 from types import ModuleType
 
 from ..models import CodingAgentResult, CommandPlan, ReproState
-from ..runtime.environment import find_conda
+from ..runtime.environment import conda_run_flag, find_conda
 
 ENV_VAR = "CODINGAGENT_PATH"
 
@@ -320,7 +320,7 @@ def _wrap_verify_command(command: str, env_name: str) -> str:
     return " ".join([
         shlex.quote(conda),
         "run",
-        "-n",
+        conda_run_flag(env_name),
         shlex.quote(env_name),
         "bash",
         "-c",

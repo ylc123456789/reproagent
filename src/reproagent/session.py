@@ -136,15 +136,22 @@ def _key_artifacts(state: AgentState, ws: Path) -> list[dict]:
             "path": _relative_to_ws(audit.stdout_path, ws),
             "summary": "environment audit stdout",
         })
+    # Priority before truncation: experiment evidence first, setup/probe logs
+    # only with the remaining capacity — the cap must never drop the primary
+    # experiment logs behind a long provisioning phase.
+    experiment_logs: list[dict] = []
+    other_logs: list[dict] = []
     for step in state.steps:
+        bucket = experiment_logs if step.stage_hint == "experiment" else other_logs
         for result in step.command_results:
             for label, path in (("stdout", result.stdout_path), ("stderr", result.stderr_path)):
                 if path is not None and path.exists():
-                    artifacts.append({
+                    bucket.append({
                         "type": "experiment_log",
                         "path": _relative_to_ws(path, ws),
                         "summary": f"step {step.step} {label} of: {result.command[:80]}",
                     })
+    artifacts += experiment_logs + other_logs
     return artifacts[:12]
 
 

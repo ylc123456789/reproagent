@@ -95,7 +95,7 @@ def audit_environment(state: ReproState) -> EnvironmentAudit:
             pip_version = str(data.get("pip_version") or "")
             details.append(f"Python executable: {executable or 'unknown'}")
             details.append(f"Pip: {pip_version or 'unknown'}")
-            env_name_matches = env_prefix.name == state.environment.env_name
+            env_name_matches = _env_ref_matches(env_prefix, state.environment.env_name)
             if not env_name_matches:
                 success = False
                 details.append(f"Mismatch: sys.prefix does not match expected conda env {state.environment.env_name}: {env_prefix}")
@@ -159,6 +159,21 @@ def _gpu_visible(state: ReproState) -> bool:
         return False
     hardware = state.repo_context.hardware_text.lower()
     return "gpu 0:" in hardware or ("nvidia-smi:" in hardware and "not available" not in hardware)
+
+
+def _env_ref_matches(env_prefix: Path, expected: str) -> bool:
+    """Whether the audited prefix matches the expected environment reference.
+
+    Names match by environment name; absolute prefix references match by
+    resolved path (a name comparison would always fail for prefixes).
+    """
+    ref = Path(expected).expanduser()
+    if ref.is_absolute():
+        try:
+            return env_prefix.resolve() == ref.resolve()
+        except OSError:
+            return False
+    return env_prefix.name == expected
 
 
 def _infer_env_prefix(sys_prefix: str, executable: str) -> Path:

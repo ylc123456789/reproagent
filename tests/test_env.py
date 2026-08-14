@@ -6,6 +6,12 @@ def test_build_backend_command_wraps_conda_run():
     assert cmd == ["/fake/conda", "run", "--no-capture-output", "-n", "repro_demo", "bash", "-o", "pipefail", "-c", "python3 --version"]
 
 
+def test_build_backend_command_uses_prefix_flag_for_absolute_env():
+    cmd = build_backend_command("/opt/conda/envs/repro_demo", "python3 --version", conda="/fake/conda")
+    assert cmd == ["/fake/conda", "run", "--no-capture-output", "-p", "/opt/conda/envs/repro_demo",
+                   "bash", "-o", "pipefail", "-c", "python3 --version"]
+
+
 def test_env_name_sanitizes_task_id():
     assert _env_name("repro-20260724-abc123").startswith("repro_repro_20260724_abc123")
 

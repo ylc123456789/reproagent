@@ -30,6 +30,17 @@ def _not_setup_allowed(commands: list[str]) -> list[str]:
     return [cmd for cmd in commands if not _is_setup_command(cmd)]
 
 
+_ENV_MUTATING_RE = re.compile(
+    r"^(?:python\d?(?:\.\d+)? -m )?pip\d?(?:\.\d+)? (?:install|uninstall|upgrade)\b"
+    r"|^conda (?:install|remove|update|uninstall)\b"
+)
+
+
+def _is_env_mutating_command(command: str) -> bool:
+    """Whether the command changes installed packages (invalidates the audit)."""
+    return bool(_ENV_MUTATING_RE.match(command.strip().lower()))
+
+
 def _parse_action(text: str) -> AgentAction | None:
     """Extract a valid JSON action from LLM response text. Returns None on parse failure."""
     match = re.search(r"\{[^{}]*\"action\"[^{}]*\}", text, re.DOTALL)
@@ -142,6 +153,10 @@ def _tool_run_commands(action: AgentAction, state: AgentState) -> AgentObservati
             timeout=state.task.timeout_seconds,
             env_name=env_name,
         )
+    # Package changes invalidate the certification: a stale successful audit
+    # must never certify a mutated environment.
+    if results and any(_is_env_mutating_command(cmd) for cmd in commands):
+        state.last_audit = None
     return AgentObservation(
         step=len(state.steps) + 1,
         action=action.action,

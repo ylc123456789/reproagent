@@ -195,6 +195,83 @@ def test_certification_gate_lifts_after_successful_audit(tmp_path):
     assert observation.command_results[0].exit_code == 0
 
 
+def test_certification_gate_blocks_inline_python_before_audit(tmp_path):
+    """python -c is NOT a setup-safe escape hatch: arbitrary inline programs
+    are blocked before audit regardless of stage labels."""
+    task = ReproTask(repo_url="repo", workspace_dir=tmp_path, mock_llm=True)
+    state = AgentState(task=task)
+    action = AgentAction(
+        thinking="try", action="run_commands", stage_hint="environment",
+        commands=["python -c \"import torch; torch.save(model, 'p.pt')\""],
+    )
+
+    observation = _tool_run_commands(action, state)
+
+    assert not observation.command_results
+    assert "not yet certified" in observation.error
+
+
+def test_env_mutating_command_invalidates_audit(tmp_path, monkeypatch):
+    """A successful audit goes stale after a dependency change."""
+    import reproagent.controller.actions as actions_module
+    from reproagent.models import CommandResult, EnvironmentAudit
+
+    task = ReproTask(repo_url="repo", workspace_dir=tmp_path, mock_llm=True)
+    state = AgentState(
+        task=task,
+        last_audit=EnvironmentAudit(success=True, summary="passed"),
+    )
+    dummy = CommandResult(
+        command="pip install torch", exit_code=0,
+        stdout_path=tmp_path / "o", stderr_path=tmp_path / "e", duration_seconds=0.0,
+    )
+    monkeypatch.setattr(actions_module, "_mock_run_commands", lambda commands, state: [dummy])
+
+    action = AgentAction(
+        thinking="install", action="run_commands", stage_hint="environment",
+        commands=["pip install torch"],
+    )
+    _tool_run_commands(action, state)
+
+    assert state.last_audit is None
+
+
+def test_stale_audit_blocks_experiment_until_re_audit(tmp_path, monkeypatch):
+    """audit → pip install → experiment: the experiment is refused because
+    the install invalidated the audit; a fresh audit re-opens the gate."""
+    import reproagent.controller.actions as actions_module
+    import reproagent.llm as llm_module
+    from reproagent.models import CommandResult, EnvironmentAudit
+
+    dummy = CommandResult(
+        command="pip install torch", exit_code=0,
+        stdout_path=tmp_path / "o", stderr_path=tmp_path / "e", duration_seconds=0.0,
+    )
+    monkeypatch.setattr(actions_module, "_mock_run_commands", lambda commands, state: [dummy])
+    monkeypatch.setattr(
+        actions_module, "audit_environment",
+        lambda state: EnvironmentAudit(success=True, summary="passed"),
+    )
+    responses = iter([
+        '{"thinking": "audit", "action": "audit_env"}',
+        '{"thinking": "install", "action": "run_commands", "stage_hint": "environment", '
+        '"commands": ["pip install torch"]}',
+        '{"thinking": "train", "action": "run_commands", "stage_hint": "experiment", '
+        '"commands": ["python train.py"]}',
+        '{"thinking": "done", "action": "finish", "finish_status": "completed", '
+        '"finish_summary": "done"}',
+    ])
+    monkeypatch.setattr(llm_module, "mock_response", lambda user: next(responses))
+
+    task = ReproTask(repo_url="repo", workspace_dir=tmp_path / "run",
+                     experiment_goal="g", mock_llm=True, max_steps=6)
+    state = run_controller(task)
+
+    blocked = [s for s in state.steps if s.error and "not yet certified" in s.error]
+    assert blocked, "experiment after pip install must be blocked"
+    assert state.status == "completed"
+
+
 def test_setup_only_mock_run_with_successful_audit_completes(tmp_path, monkeypatch):
     """With a passing audit, the mock setup_only run completes."""
     import reproagent.controller.actions as actions_module

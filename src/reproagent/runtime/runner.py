@@ -62,12 +62,16 @@ _SETUP_ALLOWED_FIRST_WORDS = {
 
 
 def _is_setup_command(command: str) -> bool:
-    """Return whether a command is allowed during setup_only provisioning.
+    """Return whether a command is allowed during provisioning / pre-audit.
 
     Deterministic whitelist — independent of LLM stage labels.  Only package
     installation, file inspection, and setup chores pass; direct script or
     module execution (python train.py, ./run.sh, bash x.sh, make ...) never
     does, so experiments cannot run in setup_only mode.
+
+    Arbitrary inline Python (`python -c ...`) is deliberately REJECTED:
+    an experiment can be embedded in it and would bypass the whitelist.
+    Import/version probing is available through the audit_env tool.
     """
     lowered = command.strip().lower()
     if "--help" in lowered or lowered.endswith(" -h") or " -h " in lowered:
@@ -75,9 +79,10 @@ def _is_setup_command(command: str) -> bool:
     if lowered.startswith(("python -m pip ", "python3 -m pip ",
                            "python -m py_compile ", "python3 -m py_compile ",
                            "python --version", "python3 --version",
-                           "python -V", "python3 -V",
-                           "python -c ", "python3 -c ")):
+                           "python -V", "python3 -V")):
         return True
+    if lowered.startswith(("python -c ", "python3 -c ")):
+        return False
     first = lowered.split()[0] if lowered.split() else ""
     return first in _SETUP_ALLOWED_FIRST_WORDS
 

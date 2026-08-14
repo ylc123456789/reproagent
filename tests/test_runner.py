@@ -211,9 +211,17 @@ def test_probe_allows_help_but_blocks_training():
 def test_setup_stage_allows_provisioning_and_inspection():
     for cmd in ("pip install -r requirements.txt", "python -m pip install x",
                 "head -20 README.md", "git status", "echo ok",
-                "python -c \"print(1)\"", "python train.py --help"):
+                "python train.py --help"):
         ok, reason = is_safe_command(cmd, stage="setup")
         assert ok, f"{cmd}: {reason}"
+
+
+def test_setup_stage_blocks_inline_python():
+    """Arbitrary python -c is rejected: an experiment could be embedded."""
+    for cmd in ("python -c \"import torch; torch.save(x, 'out.pt')\"",
+                "python3 -c \"print(1)\""):
+        ok, reason = is_safe_command(cmd, stage="setup")
+        assert not ok, cmd
 
 
 def test_setup_stage_blocks_script_execution():

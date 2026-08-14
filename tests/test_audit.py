@@ -103,6 +103,30 @@ def test_audit_passes_with_custom_conda_env_dir(tmp_path, monkeypatch):
     assert not any("Mismatch" in item for item in audit.details)
 
 
+def test_audit_matches_explicit_prefix_environment(tmp_path, monkeypatch):
+    """env_name as an absolute prefix must match by resolved path, not name."""
+    env_prefix = "/opt/conda/envs/repro_demo"
+    task = ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path)
+    state = ReproState(
+        task=task,
+        repo_context=RepoContext(repo_path=tmp_path),
+        environment=EnvironmentInfo(env_name=env_prefix),
+    )
+
+    class Result:
+        returncode = 0
+        stdout = '{"sys_executable":"' + env_prefix + '/bin/python","sys_prefix":"' + env_prefix + '","pip_version":"pip 1 from ' + env_prefix + '/lib/python3.10/site-packages/pip"}'
+        stderr = ""
+
+    monkeypatch.setattr("reproagent.runtime.audit.find_conda", lambda: "/fake/conda")
+    monkeypatch.setattr("reproagent.runtime.audit.subprocess.run", lambda *args, **kwargs: Result())
+
+    audit = audit_environment(state)
+
+    assert audit.success
+    assert not any("Mismatch" in item for item in audit.details)
+
+
 def test_audit_uses_sanitized_command_environment(tmp_path, monkeypatch):
     env_prefix = "/home/cyl/miniconda3/envs/repro_demo"
     task = ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path)

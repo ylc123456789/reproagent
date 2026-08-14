@@ -238,9 +238,10 @@ summary of the prepared environment.
 The runner enforces a deterministic command whitelist (independent of
 stage_hint): only package installation (pip), inspection (ls/cat/grep/
 head/tail/find/rg/sed/wc/pwd/which), --help probes, python -m py_compile,
-python -c checks, and setup chores (git/mkdir/cp/mv/ln/wget/curl/echo) are
-allowed. Direct script or module execution (python *.py, ./run.sh,
-bash x.sh, make ...) is blocked — experiments cannot run here.
+and setup chores (git/mkdir/cp/mv/ln/wget/curl/echo) are allowed. Direct
+script or module execution (python *.py, ./run.sh, bash x.sh, make ...)
+and arbitrary python -c inline programs are blocked — experiments cannot
+run here. Import/version probing is done via the audit_env tool.
 
 A successful audit_env is REQUIRED before finish; without it the run ends
 failed."""
