@@ -235,10 +235,19 @@ def test_setup_stage_rejects_compound_commands():
     """Shell control operators are rejected — one command per list item."""
     for cmd in ("echo ok && python train.py", "pip install x && python train.py",
                 "echo ok && pip install x", "python train.py --help && echo x",
-                "a | b", "a; b", "a || b", "echo $(whoami)", "echo `whoami`",
+                "a | b", "a; b", "a || b", "a & b", "echo $(whoami)",
+                "echo `whoami`", "cat <(python train.py)", "(python train.py)",
                 "a\nb"):
         ok, reason = is_safe_command(cmd, stage="setup")
         assert not ok, cmd
+
+
+def test_setup_stage_parses_whitespace_and_quoted_operators():
+    """Equivalent whitespace is accepted and operators inside quotes stay data."""
+    for cmd in ("pip  install x", "pip\tinstall x", "conda  install pytorch",
+                "echo 'a|b'"):
+        ok, reason = is_safe_command(cmd, stage="setup")
+        assert ok, f"{cmd}: {reason}"
 
 
 def test_setup_stage_blocks_script_execution():

@@ -222,7 +222,7 @@ def test_env_mutating_command_invalidates_audit(tmp_path, monkeypatch):
     # mutation policy before execution (see test_mutation_action_rejects_*)
     mutating = [
         "pip install torch", "python -m pip install torch", "conda install pytorch",
-        "conda env update -f environment.yml",
+        "conda env update -f environment.yml", "pip  install scipy", "pip\tinstall numpy",
         "pip uninstall torch", "uv pip install x", "poetry add x",
     ]
     for command in mutating:
@@ -299,7 +299,10 @@ def test_mutation_action_rejects_compound_mutation(tmp_path):
     """Bypass 1: a compound mutation in one list item is refused post-audit —
     the training half must never run against the mutated environment."""
     state = _certified_state(tmp_path)
-    for command in ("pip install x && python train.py", "echo ok && pip install torch"):
+    for command in ("pip install x && python train.py", "echo ok && pip install torch",
+                    "pip install x & python train.py",
+                    "pip install -r <(python train.py)",
+                    "pip install x\npython train.py"):
         observation = _tool_run_commands(
             AgentAction(thinking="t", action="run_commands", stage_hint="environment",
                         commands=[command]),

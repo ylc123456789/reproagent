@@ -22,7 +22,7 @@ from ..models import (
     EnvironmentAudit,
 )
 from ..runtime.audit import audit_environment
-from ..runtime.runner import _has_shell_control, _is_setup_command, run_commands
+from ..runtime.runner import analyze_command, _is_setup_command, run_commands
 
 
 def _not_setup_allowed(commands: list[str]) -> list[str]:
@@ -30,22 +30,9 @@ def _not_setup_allowed(commands: list[str]) -> list[str]:
     return [cmd for cmd in commands if not _is_setup_command(cmd)]
 
 
-_ENV_MUTATING_RE = re.compile(
-    # pip family (plain or python -m), anywhere in the string — a compound
-    # command like "echo ok && pip install x" must invalidate too
-    r"(?:^|[\s;&|])(?:(?:python\d?(?:\.\d+)?) -m )?pip\d?(?:\.\d+)? (?:install|uninstall|upgrade)\b"
-    # conda family and its mamba equivalents, including env update
-    r"|(?:^|[\s;&|])(?:conda|mamba|micromamba) (?:install|remove|update|uninstall)\b"
-    r"|(?:^|[\s;&|])(?:conda|mamba|micromamba) env update\b"
-    # other package managers that mutate the current environment
-    r"|(?:^|[\s;&|])uv pip (?:install|uninstall)\b"
-    r"|(?:^|[\s;&|])poetry (?:add|remove|install|update)\b"
-)
-
-
 def _is_env_mutating_command(command: str) -> bool:
     """Whether the command changes installed packages (invalidates the audit)."""
-    return bool(_ENV_MUTATING_RE.search(command.strip().lower()))
+    return analyze_command(command).mutates_environment
 
 
 def _parse_action(text: str) -> AgentAction | None:
@@ -142,9 +129,10 @@ def _tool_run_commands(action: AgentAction, state: AgentState) -> AgentObservati
     # smuggle in experiment commands — not in the same list item (compound
     # shell operators) and not in the same action (a later item would run
     # against the un-audited mutated environment).
-    mutating = [cmd for cmd in commands if _is_env_mutating_command(cmd)]
+    analyses = {cmd: analyze_command(cmd) for cmd in commands}
+    mutating = [cmd for cmd in commands if analyses[cmd].mutates_environment]
     if mutating:
-        compound = [cmd for cmd in mutating if _has_shell_control(cmd)]
+        compound = [cmd for cmd in mutating if analyses[cmd].has_shell_control]
         if compound:
             return AgentObservation(
                 step=len(state.steps) + 1,

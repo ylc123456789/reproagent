@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from .environment import build_backend_command, find_conda
@@ -61,7 +63,97 @@ _SETUP_ALLOWED_FIRST_WORDS = {
     "echo",
 }
 
-_SHELL_CONTROL_RE = re.compile(r"&&|\|\||;|\||\n|\r|\$\(|`")
+_SHELL_PUNCTUATION = ";&|<>()"
+_COMMAND_SUBSTITUTION_RE = re.compile(r"\$\(|`")
+_ENV_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*", re.DOTALL)
+_PIP_EXECUTABLE_RE = re.compile(r"pip(?:\d+(?:\.\d+)?)?")
+_PYTHON_EXECUTABLE_RE = re.compile(r"python(?:\d+(?:\.\d+)?)?")
+
+
+@dataclass(frozen=True)
+class CommandAnalysis:
+    """Shell-aware facts shared by setup and environment mutation policy."""
+
+    tokens: tuple[str, ...]
+    has_shell_control: bool
+    mutates_environment: bool
+
+
+def _command_tokens(command: str) -> tuple[tuple[str, ...], bool]:
+    """Tokenize one shell command and identify executable shell structure."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=_SHELL_PUNCTUATION)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        tokens = tuple(lexer)
+    except ValueError:
+        return (), True
+    operators = set(_SHELL_PUNCTUATION)
+    has_control = any(token and set(token) <= operators for token in tokens)
+    has_control = (
+        has_control
+        or "\n" in command
+        or "\r" in command
+        or bool(_COMMAND_SUBSTITUTION_RE.search(command))
+    )
+    return tokens, has_control
+
+
+def _command_start(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:
+    """Return executable basename and arguments, skipping env assignments."""
+    index = 0
+    if tokens and tokens[0] == "env":
+        index = 1
+    while index < len(tokens) and _ENV_ASSIGNMENT_RE.fullmatch(tokens[index]):
+        index += 1
+    if index >= len(tokens):
+        return "", ()
+    return Path(tokens[index]).name.lower(), tokens[index + 1:]
+
+
+def _segment_mutates_environment(tokens: tuple[str, ...]) -> bool:
+    executable, arguments = _command_start(tokens)
+    lowered = tuple(argument.lower() for argument in arguments)
+    if _PIP_EXECUTABLE_RE.fullmatch(executable):
+        return bool(lowered and lowered[0] in {"install", "uninstall", "upgrade"})
+    if (_PYTHON_EXECUTABLE_RE.fullmatch(executable) and len(lowered) >= 3
+            and lowered[0] == "-m" and _PIP_EXECUTABLE_RE.fullmatch(lowered[1])):
+        return lowered[2] in {"install", "uninstall", "upgrade"}
+    if executable in {"conda", "mamba", "micromamba"}:
+        return bool(
+            lowered and lowered[0] in {"create", "install", "remove", "update", "uninstall"}
+        ) or bool(len(lowered) >= 2 and lowered[:2] in {
+            ("env", "create"), ("env", "remove"), ("env", "update"),
+        })
+    if executable == "uv" and len(lowered) >= 2 and lowered[0] == "pip":
+        return lowered[1] in {"install", "uninstall"}
+    if executable == "poetry" and lowered:
+        return lowered[0] in {"add", "install", "remove", "update"}
+    return False
+
+
+def _mutates_environment(tokens: tuple[str, ...]) -> bool:
+    """Check every shell segment so a mutation cannot hide after `&&`."""
+    operators = set(_SHELL_PUNCTUATION)
+    segment: list[str] = []
+    for token in (*tokens, ";"):
+        if token and set(token) <= operators:
+            if _segment_mutates_environment(tuple(segment)):
+                return True
+            segment = []
+        else:
+            segment.append(token)
+    return False
+
+
+def analyze_command(command: str) -> CommandAnalysis:
+    """Analyze a command once so all execution gates use identical semantics."""
+    tokens, has_shell_control = _command_tokens(command)
+    return CommandAnalysis(
+        tokens=tokens,
+        has_shell_control=has_shell_control,
+        mutates_environment=_mutates_environment(tokens),
+    )
 
 
 def _has_shell_control(command: str) -> bool:
@@ -71,7 +163,7 @@ def _has_shell_control(command: str) -> bool:
     newlines) are rejected by the setup/pre-audit policy: exactly one
     command per list item, because run_commands already accepts a list.
     """
-    return bool(_SHELL_CONTROL_RE.search(command))
+    return analyze_command(command).has_shell_control
 
 
 def _is_setup_command(command: str) -> bool:
@@ -89,23 +181,25 @@ def _is_setup_command(command: str) -> bool:
     an experiment can be embedded in it and would bypass the whitelist.
     Import/version probing is available through the audit_env tool.
     """
-    lowered = command.strip().lower()
-    if _has_shell_control(command):
+    analysis = analyze_command(command)
+    if analysis.has_shell_control or not analysis.tokens:
         return False
-    if "--help" in lowered or lowered.endswith(" -h") or " -h " in lowered:
+    executable, arguments = _command_start(analysis.tokens)
+    lowered_arguments = tuple(argument.lower() for argument in arguments)
+    if "--help" in lowered_arguments or "-h" in lowered_arguments:
         return True
-    if lowered.startswith(("python -m pip ", "python3 -m pip ",
-                           "python -m py_compile ", "python3 -m py_compile ",
-                           "python --version", "python3 --version",
-                           "python -V", "python3 -V")):
+    if _PIP_EXECUTABLE_RE.fullmatch(executable):
         return True
-    if lowered.startswith(("python -c ", "python3 -c ")):
-        return False
-    if lowered.startswith(("conda install ", "conda env update ", "conda remove ",
-                           "conda update ", "conda uninstall ")):
+    if _PYTHON_EXECUTABLE_RE.fullmatch(executable):
+        if len(lowered_arguments) >= 2 and lowered_arguments[0] == "-m":
+            return bool(
+                _PIP_EXECUTABLE_RE.fullmatch(lowered_arguments[1])
+                or lowered_arguments[1] == "py_compile"
+            )
+        return bool(arguments and arguments[0] in {"--version", "-V"})
+    if executable == "conda" and analysis.mutates_environment:
         return True
-    first = lowered.split()[0] if lowered.split() else ""
-    return first in _SETUP_ALLOWED_FIRST_WORDS
+    return executable in _SETUP_ALLOWED_FIRST_WORDS
 
 
 def _has_parent_directory_traversal(command: str) -> bool:
