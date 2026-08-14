@@ -22,7 +22,7 @@ from ..models import (
     EnvironmentAudit,
 )
 from ..runtime.audit import audit_environment
-from ..runtime.runner import _is_setup_command, run_commands
+from ..runtime.runner import _has_shell_control, _is_setup_command, run_commands
 
 
 def _not_setup_allowed(commands: list[str]) -> list[str]:
@@ -138,6 +138,33 @@ def _tool_run_commands(action: AgentAction, state: AgentState) -> AgentObservati
                       "dependencies, run audit_env, then retry. Blocked: "
                       + "; ".join(blocked),
             )
+    # Mutation policy: an action that changes installed packages must not
+    # smuggle in experiment commands — not in the same list item (compound
+    # shell operators) and not in the same action (a later item would run
+    # against the un-audited mutated environment).
+    mutating = [cmd for cmd in commands if _is_env_mutating_command(cmd)]
+    if mutating:
+        compound = [cmd for cmd in mutating if _has_shell_control(cmd)]
+        if compound:
+            return AgentObservation(
+                step=len(state.steps) + 1,
+                action=action.action,
+                stage_hint=action.stage_hint,
+                error="environment-mutating commands must be single commands "
+                      "without shell operators: " + "; ".join(compound),
+            )
+        experiments = [cmd for cmd in commands
+                       if not _is_env_mutating_command(cmd) and not _is_setup_command(cmd)]
+        if experiments:
+            return AgentObservation(
+                step=len(state.steps) + 1,
+                action=action.action,
+                stage_hint=action.stage_hint,
+                error="environment-mutating and experiment commands cannot share "
+                      "one action — install first, run audit_env, then run "
+                      "experiments in a later action. Experiment commands: "
+                      + "; ".join(experiments),
+            )
     if (state.task.confirm_before_experiment and action.stage_hint == "experiment"
             and not _confirm_experiment(commands)):
         return AgentObservation(
@@ -160,9 +187,10 @@ def _tool_run_commands(action: AgentAction, state: AgentState) -> AgentObservati
             timeout=state.task.timeout_seconds,
             env_name=env_name,
         )
-    # Package changes invalidate the certification: a stale successful audit
-    # must never certify a mutated environment.
-    if results and any(_is_env_mutating_command(cmd) for cmd in commands):
+    # Package changes invalidate the certification immediately when the
+    # action completes: the next action's experiment commands are refused
+    # until a fresh audit_env succeeds.
+    if results and mutating:
         state.last_audit = None
     return AgentObservation(
         step=len(state.steps) + 1,

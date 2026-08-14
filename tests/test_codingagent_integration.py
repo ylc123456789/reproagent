@@ -182,6 +182,25 @@ def test_env_fields_passed_when_supported(tmp_path):
     assert spec["env_name"] == "resenv_x"
 
 
+def test_environment_summary_uses_conda_run_flag(tmp_path):
+    """P3: the environment summary describes the actual flag (-p for
+    prefixes, -n for names), not a hardcoded conda run -n."""
+    from reproagent.integrations.codingagent import _environment_summary
+    from reproagent.models import EnvironmentInfo, RepoContext, ReproState, ReproTask
+
+    def make_state(env_name):
+        return ReproState(
+            task=ReproTask(workspace_dir=tmp_path / "w"),
+            repo_context=RepoContext(repo_path=tmp_path / "r"),
+            environment=EnvironmentInfo(env_name=env_name),
+        )
+
+    assert "conda run -n resenv_x" in _environment_summary(make_state("resenv_x"))
+    assert "conda run -p /opt/conda/envs/resenv_x" in _environment_summary(
+        make_state("/opt/conda/envs/resenv_x")
+    )
+
+
 def test_patch_orchestration_passes_frozen_env_policy(tmp_path):
     """run_coding_agent_for_patch delegates with env_policy=frozen + the
     operator's env name (contract O5)."""

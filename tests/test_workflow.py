@@ -218,9 +218,11 @@ def test_env_mutating_command_invalidates_audit(tmp_path, monkeypatch):
     import reproagent.controller.actions as actions_module
     from reproagent.models import CommandResult, EnvironmentAudit
 
+    # single-command mutations only — compound mutations are rejected by the
+    # mutation policy before execution (see test_mutation_action_rejects_*)
     mutating = [
         "pip install torch", "python -m pip install torch", "conda install pytorch",
-        "conda env update -f environment.yml", "echo ok && pip install torch",
+        "conda env update -f environment.yml",
         "pip uninstall torch", "uv pip install x", "poetry add x",
     ]
     for command in mutating:
@@ -282,6 +284,68 @@ def test_certification_gate_rejects_compound_before_audit(tmp_path):
         )
         assert not observation.command_results, command
         assert "not yet certified" in observation.error
+
+
+def _certified_state(tmp_path, task=None):
+    from reproagent.models import EnvironmentAudit
+
+    return AgentState(
+        task=task or ReproTask(repo_url="repo", workspace_dir=tmp_path, mock_llm=True),
+        last_audit=EnvironmentAudit(success=True, summary="passed"),
+    )
+
+
+def test_mutation_action_rejects_compound_mutation(tmp_path):
+    """Bypass 1: a compound mutation in one list item is refused post-audit —
+    the training half must never run against the mutated environment."""
+    state = _certified_state(tmp_path)
+    for command in ("pip install x && python train.py", "echo ok && pip install torch"):
+        observation = _tool_run_commands(
+            AgentAction(thinking="t", action="run_commands", stage_hint="environment",
+                        commands=[command]),
+            state,
+        )
+        assert not observation.command_results, command
+        assert "must be single commands" in observation.error
+        assert state.last_audit is not None  # nothing executed, certification intact
+
+
+def test_mutation_action_rejects_experiment_in_same_action(tmp_path):
+    """Bypass 2: ['pip install x', 'python train.py'] in one action is refused —
+    the experiment item would run against the un-audited mutated environment."""
+    state = _certified_state(tmp_path)
+    observation = _tool_run_commands(
+        AgentAction(thinking="t", action="run_commands", stage_hint="experiment",
+                    commands=["pip install x", "python train.py"]),
+        state,
+    )
+
+    assert not observation.command_results
+    assert "cannot share one action" in observation.error
+    assert state.last_audit is not None
+
+
+def test_mutation_action_allows_mutation_plus_inspection(tmp_path, monkeypatch):
+    """A mutation action may carry inspection commands; the audit is cleared
+    when the action completes so the NEXT action must re-audit."""
+    import reproagent.controller.actions as actions_module
+    from reproagent.models import CommandResult
+
+    state = _certified_state(tmp_path)
+    dummy = CommandResult(
+        command="x", exit_code=0,
+        stdout_path=tmp_path / "o", stderr_path=tmp_path / "e", duration_seconds=0.0,
+    )
+    monkeypatch.setattr(actions_module, "_mock_run_commands", lambda commands, state: [dummy] * len(commands))
+
+    observation = _tool_run_commands(
+        AgentAction(thinking="t", action="run_commands", stage_hint="environment",
+                    commands=["pip install x", "head -20 README.md"]),
+        state,
+    )
+
+    assert len(observation.command_results) == 2
+    assert state.last_audit is None  # cleared immediately at action end
 
 
 def test_stale_audit_blocks_experiment_until_re_audit(tmp_path, monkeypatch):

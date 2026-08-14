@@ -289,7 +289,7 @@ def _environment_summary(state: ReproState) -> str:
         f"- reproagent has already prepared the conda environment {state.environment.env_name!r} for this repository.\n"
         f"- Environment backend: {state.environment.backend}. Created this run: {state.environment.created}.\n"
         f"- CodingAgent source: {codingagent_path}.\n"
-        f"- Verification commands are executed via conda run -n {state.environment.env_name} bash -c <command>.\n"
+        f"- Verification commands are executed via conda run {conda_run_flag(state.environment.env_name)} {state.environment.env_name} bash -c <command>.\n"
         "- Do not install, upgrade, or remove dependencies from CodingAgent. Dependency/environment repair belongs to reproagent environment stage.\n"
         "- Your responsibility is repo-local code/config edits and verification inside the prepared environment."
         f"{audit_details}"
