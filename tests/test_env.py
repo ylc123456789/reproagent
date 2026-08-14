@@ -107,3 +107,72 @@ def test_pipefail_non_pipeline_preserves_exit_code(tmp_path):
         text=True, capture_output=True, timeout=10,
     )
     assert result.returncode == 42
+
+
+# ── explicit environment binding (P4 contract) ────────────────────
+
+def _fake_conda_env_list(envs: list[str]):
+    import json as _json
+    import subprocess
+
+    def fake_run(cmd, text, capture_output, timeout):
+        if cmd[:3] == ["/fake/conda", "env", "list"]:
+            return subprocess.CompletedProcess(cmd, 0, _json.dumps({"envs": envs}), "")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    return fake_run
+
+
+def _env_state(tmp_path, **task_kwargs):
+    from reproagent.models import RepoContext, ReproState, ReproTask
+
+    return ReproState(
+        task=ReproTask(workspace_dir=tmp_path, **task_kwargs),
+        repo_context=RepoContext(repo_path=tmp_path / "repo"),
+    )
+
+
+def test_ensure_environment_binds_explicit_name(tmp_path, monkeypatch):
+    """env_name names an existing conda env → bound unchanged, no creation."""
+    from reproagent.runtime import environment as env_module
+
+    monkeypatch.setattr(env_module, "find_conda", lambda: "/fake/conda")
+    monkeypatch.setattr(
+        env_module.subprocess, "run",
+        _fake_conda_env_list(["/opt/conda/envs/target_env"]),
+    )
+
+    info = env_module.ensure_environment(_env_state(tmp_path, env_name="target_env"))
+
+    assert info.env_name == "target_env"
+    assert info.created is False
+
+
+def test_ensure_environment_binds_explicit_prefix(tmp_path, monkeypatch):
+    """An absolute env_name is matched as a conda PREFIX."""
+    from reproagent.runtime import environment as env_module
+
+    monkeypatch.setattr(env_module, "find_conda", lambda: "/fake/conda")
+    monkeypatch.setattr(
+        env_module.subprocess, "run",
+        _fake_conda_env_list(["/opt/conda/envs/target_env"]),
+    )
+
+    info = env_module.ensure_environment(
+        _env_state(tmp_path, env_name="/opt/conda/envs/target_env")
+    )
+
+    assert info.env_name == "/opt/conda/envs/target_env"
+    assert info.created is False
+
+
+def test_ensure_environment_fails_on_missing_explicit_env(tmp_path, monkeypatch):
+    """An unresolvable explicit env fails loudly — never a substitute creation."""
+    import pytest
+    from reproagent.runtime import environment as env_module
+
+    monkeypatch.setattr(env_module, "find_conda", lambda: "/fake/conda")
+    monkeypatch.setattr(env_module.subprocess, "run", _fake_conda_env_list([]))
+
+    with pytest.raises(RuntimeError, match="Explicit environment 'ghost_env' was not found"):
+        env_module.ensure_environment(_env_state(tmp_path, env_name="ghost_env"))

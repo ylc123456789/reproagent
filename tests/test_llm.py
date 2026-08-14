@@ -50,3 +50,26 @@ def test_build_context_reused_env(tmp_path):
     env = EnvironmentInfo(env_name="repro_test", created=False)
     text = build_initial_context(task, ctx, env)
     assert "reused" in text.lower()
+
+
+def test_build_context_renders_input_artifacts(tmp_path):
+    task = ReproTask(
+        repo_url="r", workspace_dir=tmp_path, experiment_goal="g",
+        input_artifacts=[
+            {"path": "/contract/prior/measurements.json", "description": "baseline metrics"},
+            {"path": "/contract/prior/checkpoint.pt"},
+        ],
+    )
+    ctx = RepoContext(repo_path=tmp_path / "repo", hardware_text="cpu", readme_text="r", file_tree="f")
+    text = build_initial_context(task, ctx, EnvironmentInfo(env_name="e"))
+
+    assert "## Input Artifacts" in text
+    assert "/contract/prior/measurements.json — baseline metrics" in text
+    assert "/contract/prior/checkpoint.pt" in text
+
+
+def test_build_context_omits_input_artifacts_when_empty(tmp_path):
+    task = ReproTask(repo_url="r", workspace_dir=tmp_path, experiment_goal="g")
+    ctx = RepoContext(repo_path=tmp_path / "repo", hardware_text="cpu", readme_text="r", file_tree="f")
+    text = build_initial_context(task, ctx, EnvironmentInfo(env_name="e"))
+    assert "Input Artifacts" not in text

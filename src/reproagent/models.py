@@ -55,6 +55,14 @@ class ReproTask(BaseModel):
     external_repo_path: str = ""
     setup_only: bool = False
     allow_code_delegation: bool = True
+    # Explicit environment binding: a conda env NAME or absolute PREFIX.
+    # When set, the environment is used unchanged for every command stage;
+    # a missing environment is an error, never a substitute creation.
+    # env_namespace remains the default creation mechanism when unset.
+    env_name: str = ""
+    # Structured upstream artifacts (prior measurements/files from other
+    # modules). Rendered into prompts verbatim; optional.
+    input_artifacts: list[dict] = Field(default_factory=list)
 
 
 class RepoContext(BaseModel):

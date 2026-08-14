@@ -62,9 +62,11 @@ def test_prompt_contracts() -> None:
         file_tree="README.md", readme_text="Phase 0 README", hardware_text="CPU test",
     )
     rendered = build_initial_context(task, repo, EnvironmentInfo(env_name="phase0", created=True))
-    # Deliberate behavior change (experiment-operator redesign O4):
-    # system prompt repositioned as operator + workspace source line added.
-    assert _sha256(SYSTEM_PROMPT) == "ab000e139bcbe17ba3a46bab53a77dd2ec1e42075b21457403dc4f5737cb5ab6"
+    # Deliberate behavior change (experiment-operator redesign O4 + P4 gate):
+    # system prompt repositioned as operator, workspace source line added,
+    # certification gate line added. Rendered initial context unchanged for
+    # tasks without input_artifacts.
+    assert _sha256(SYSTEM_PROMPT) == "755b4ea1f6b0abf571a4f11938b2a4e978bc2ca03d8e85969576b6f5e4e098ad"
     assert _sha256(rendered) == "6e7189958b82342b63f92af19384d7aed115565ba7121e28ee5b1b1cccc70952"
 
 
@@ -79,6 +81,8 @@ def test_persisted_model_field_contracts(tmp_path) -> None:
         "env_namespace", "isolate_env",
         # experiment-operator contract v1 additions (deliberate schema change)
         "copy_from", "external_repo_path", "setup_only", "allow_code_delegation",
+        # P4 follow-up: explicit env binding + structured upstream artifacts
+        "env_name", "input_artifacts",
     ]
     assert list(AgentState.model_fields) == [
         "task", "repo_context", "environment", "last_audit", "coding_results",

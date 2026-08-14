@@ -25,6 +25,11 @@ from ..runtime.audit import audit_environment
 from ..runtime.runner import _is_setup_command, run_commands
 
 
+def _not_setup_allowed(commands: list[str]) -> list[str]:
+    """Commands outside the deterministic provisioning/inspection whitelist."""
+    return [cmd for cmd in commands if not _is_setup_command(cmd)]
+
+
 def _parse_action(text: str) -> AgentAction | None:
     """Extract a valid JSON action from LLM response text. Returns None on parse failure."""
     match = re.search(r"\{[^{}]*\"action\"[^{}]*\}", text, re.DOTALL)
@@ -90,7 +95,7 @@ def _tool_run_commands(action: AgentAction, state: AgentState) -> AgentObservati
     if state.task.setup_only:
         # Deterministic whitelist — does NOT rely on the LLM's stage_hint:
         # script/module execution is blocked whatever label the model used.
-        blocked = [cmd for cmd in commands if not _is_setup_command(cmd)]
+        blocked = _not_setup_allowed(commands)
         if blocked:
             return AgentObservation(
                 step=len(state.steps) + 1,
@@ -98,6 +103,22 @@ def _tool_run_commands(action: AgentAction, state: AgentState) -> AgentObservati
                 stage_hint=action.stage_hint,
                 error="setup_only task: command not allowed (provisioning and "
                       "inspection only): " + "; ".join(blocked),
+            )
+    elif state.last_audit is None or not state.last_audit.success:
+        # Certification gate: a successful audit_env must precede experiment
+        # commands. Deterministic (whitelist-based) — a training command is
+        # refused whatever stage label the model used; dependency repair
+        # (pip) and inspection stay available for the bounded repair loop.
+        blocked = _not_setup_allowed(commands)
+        if blocked:
+            return AgentObservation(
+                step=len(state.steps) + 1,
+                action=action.action,
+                stage_hint=action.stage_hint,
+                error="environment is not yet certified: a successful audit_env "
+                      "is required before experiment commands. Install or repair "
+                      "dependencies, run audit_env, then retry. Blocked: "
+                      + "; ".join(blocked),
             )
     if (state.task.confirm_before_experiment and action.stage_hint == "experiment"
             and not _confirm_experiment(commands)):

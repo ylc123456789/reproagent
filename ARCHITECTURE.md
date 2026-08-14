@@ -251,6 +251,23 @@ bindings:
   pip_cache: /path
 ```
 
+`key_artifacts` registers machine-readable evidence that actually exists:
+the final report, the environment audit record, and command logs
+(stdout/stderr) — downstream analysis never guesses subdirectories.
+
+Explicit environment binding (`ReproTask.env_name`, a conda name or
+absolute prefix): the referenced environment is used unchanged by every
+command stage; a missing reference fails loudly, never creating a
+substitute. `env_namespace` remains the default creation mechanism.
+
+Certification gate: experiment commands are refused until `audit_env`
+succeeds for the selected environment — deterministically (whitelist),
+not by LLM stage labels. `setup_only` always ends with an audit artifact
+or `failed`.
+
+Structured `ReproTask.input_artifacts` renders upstream artifact paths
+into the prompts without prose parsing.
+
 Resume semantics: same `task_id` → same conda env; steps are appended to the
 previous state; `attempt_count` increments.
 

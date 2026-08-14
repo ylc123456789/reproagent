@@ -23,11 +23,30 @@ def ensure_environment(state: ReproState) -> EnvironmentInfo:
     if conda is None:
         raise RuntimeError("conda was not found. Set REPROAGENT_CONDA_EXE or install Miniconda/Anaconda so conda is on PATH.")
 
-    env_name = _env_name(state.task.task_id, namespace=state.task.env_namespace, isolate=state.task.isolate_env)
     logs = state.task.workspace_dir / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     stdout_path = logs / "conda_setup.stdout"
     stderr_path = logs / "conda_setup.stderr"
+
+    if state.task.env_name:
+        # Explicit binding: use the referenced environment unchanged.
+        # Never create a substitute; unresolvable references fail loudly.
+        if _find_conda_env(conda, state.task.env_name) is None:
+            raise RuntimeError(
+                f"Explicit environment {state.task.env_name!r} was not found. "
+                "Provide an existing conda env name or absolute prefix, or "
+                "leave env_name empty to let reproagent create one."
+            )
+        stdout_path.write_text(f"explicit environment bound: {state.task.env_name}\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return EnvironmentInfo(
+            env_name=state.task.env_name,
+            created=False,
+            setup_stdout_path=stdout_path,
+            setup_stderr_path=stderr_path,
+        )
+
+    env_name = _env_name(state.task.task_id, namespace=state.task.env_namespace, isolate=state.task.isolate_env)
 
     if _conda_env_exists(conda, env_name):
         info = EnvironmentInfo(env_name=env_name, created=False, setup_stdout_path=stdout_path, setup_stderr_path=stderr_path)
@@ -167,14 +186,28 @@ def _find_environment_yml(repo_path: Path) -> Path | None:
 
 def _conda_env_exists(conda: str, env_name: str) -> bool:
     """Return whether a conda environment already exists."""
+    return _find_conda_env(conda, env_name) is not None
+
+
+def _find_conda_env(conda: str, env_ref: str) -> str | None:
+    """Resolve an environment reference to a conda env path, or None.
+
+    One documented rule: an absolute path is matched as a conda PREFIX;
+    anything else is matched as an environment NAME.
+    """
     result = subprocess.run([conda, "env", "list", "--json"], text=True, capture_output=True, timeout=60)
     if result.returncode != 0:
-        return False
+        return None
     try:
         data = json.loads(result.stdout)
     except json.JSONDecodeError:
-        return False
+        return None
+    ref = Path(env_ref).expanduser()
     for env_path in data.get("envs", []):
-        if Path(env_path).name == env_name:
-            return True
-    return False
+        candidate = Path(env_path)
+        if ref.is_absolute():
+            if candidate == ref or candidate.resolve() == ref.resolve():
+                return env_path
+        elif candidate.name == env_ref:
+            return env_path
+    return None

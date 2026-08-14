@@ -93,10 +93,7 @@ def write_session_card(state: AgentState, *, created_at: str | None = None, **ex
         "updated_at": now,
         "summary": state.final_summary[:500] if state.final_summary else "",
         "bindings": bindings,
-        "key_artifacts": [
-            {"type": "repro_result", "path": "result.md",
-             "summary": state.final_summary[:200] if state.final_summary else ""},
-        ],
+        "key_artifacts": _key_artifacts(state, ws),
         "resume": {
             "cli": f"reproagent resume {ws} --instruction \"...\"",
             "note": "同一工作区开新一轮 loop，注入上次结果摘要与新指令",
@@ -116,6 +113,46 @@ def write_session_card(state: AgentState, *, created_at: str | None = None, **ex
 def update_session_card(state: AgentState, **extra_bindings) -> Path:
     """Update the session card status and updated_at (e.g. during resume)."""
     return write_session_card(state, **extra_bindings)
+
+
+def _key_artifacts(state: AgentState, ws: Path) -> list[dict]:
+    """Register machine-readable evidence: only paths that actually exist.
+
+    Includes the final report, the environment audit record, and command
+    logs (stdout/stderr) so downstream analysis does not guess subdirs.
+    Capped to keep the card bounded.
+    """
+    artifacts: list[dict] = []
+    result_path = ws / "result.md"
+    if result_path.exists():
+        artifacts.append(
+            {"type": "experiment_result", "path": "result.md",
+             "summary": state.final_summary[:200] if state.final_summary else ""},
+        )
+    audit = state.last_audit
+    if audit is not None and audit.stdout_path is not None and audit.stdout_path.exists():
+        artifacts.append({
+            "type": "environment_audit",
+            "path": _relative_to_ws(audit.stdout_path, ws),
+            "summary": "environment audit stdout",
+        })
+    for step in state.steps:
+        for result in step.command_results:
+            for label, path in (("stdout", result.stdout_path), ("stderr", result.stderr_path)):
+                if path is not None and path.exists():
+                    artifacts.append({
+                        "type": "experiment_log",
+                        "path": _relative_to_ws(path, ws),
+                        "summary": f"step {step.step} {label} of: {result.command[:80]}",
+                    })
+    return artifacts[:12]
+
+
+def _relative_to_ws(path: Path, ws: Path) -> str:
+    try:
+        return str(path.relative_to(ws))
+    except ValueError:
+        return str(path)
 
 
 # ── list / status ──────────────────────────────────────────────────
@@ -231,11 +268,17 @@ def _yaml_value(value) -> str:
 
 
 def _read_yaml(path: Path) -> dict:
-    """Minimal yaml reader — no pyyaml dependency."""
+    """Minimal yaml reader — no pyyaml dependency.
+
+    Supports the shapes the card writer emits: nested dicts and lists of
+    dicts (key_artifacts).  A `key:` line creates a dict placeholder; the
+    first `- item:` line under it converts it into a list.
+    """
     import re
     text = path.read_text(encoding="utf-8")
     result: dict = {}
-    stack: list[tuple[int, dict | list]] = [(0, result)]
+    # (indent, container, key) — key is the parent's key holding the container
+    stack: list[tuple[int, dict | list, str | None]] = [(0, result, None)]
     for raw in text.splitlines():
         stripped = raw.rstrip()
         if stripped == "" or stripped.lstrip().startswith("#"):
@@ -246,21 +289,38 @@ def _read_yaml(path: Path) -> dict:
         indent = len(m.group(1))
         key = m.group(2)
         value = m.group(3).strip()
-        # pop to correct indent level
+        has_dash = bool(re.match(r"^\s*-\s", raw))
         while len(stack) > 1 and stack[-1][0] >= indent:
             stack.pop()
         parent = stack[-1][1]
-        if value == "":
+        if has_dash:
+            container = stack[-1][1]
+            if not isinstance(container, list):
+                lst: list = []
+                if len(stack) >= 2:
+                    grandparent = stack[-2][1]
+                    parent_key = stack[-1][2]
+                    if isinstance(grandparent, dict) and parent_key is not None:
+                        grandparent[parent_key] = lst
+                stack[-1] = (stack[-1][0], lst, stack[-1][2])
+                container = lst
+            item: dict = {}
+            if value:
+                item[key] = _yaml_scalar(value)
+            container.append(item)
+            stack.append((indent, item, None))
+        elif value == "":
             child: dict = {}
             if isinstance(parent, list):
                 parent.append(child)
+                stack.append((indent, child, None))
             else:
                 parent[key] = child
-            stack.append((indent, child))
+                stack.append((indent, child, key))
         else:
             parsed = _yaml_scalar(value)
             if isinstance(parent, list):
-                parent.append(parsed)
+                parent[-1][key] = parsed
             else:
                 parent[key] = parsed
     return result

@@ -60,6 +60,8 @@ Format:
 - If pip install fails with a specific version, try without the version pin or from a different index.
 - After installing major dependencies (torch, tensorflow, etc.), re-run audit_env so you
   and any future call_coding_agent have accurate environment information.
+- Experiment commands are refused until audit_env reports success. If the audit
+  fails, repair the environment (pip installs) and re-run audit_env.
 
 ### Experiment
 - Probe the script interface (--help, head, grep) before running training.
@@ -103,7 +105,7 @@ Workspace: {repo_context.repo_path} (mode: {workspace_mode(task)}, commit {repo_
 Experiment goal: {task.experiment_goal}
 Timeout: {task.timeout_seconds}s per command batch
 Max steps: {task.max_steps}
-{dataset_block}
+{dataset_block}{_input_artifacts_block(task)}
 
 ## Environment
 
@@ -141,6 +143,9 @@ def build_turn_prompt(state: AgentState, policy: ContextPolicy) -> str:
     parts.append(f"Goal: {state.task.experiment_goal}")
     parts.append(f"Paper: {state.task.paper_url}")
     parts.append(f"Repo: {state.task.repo_url}")
+    input_block = _input_artifacts_block(state.task)
+    if input_block:
+        parts.append(input_block)
     if state.repo_context is not None:
         parts.append(
             f"Commands run with cwd = {state.repo_context.repo_path} (absolute). "
@@ -192,6 +197,23 @@ def build_turn_prompt(state: AgentState, policy: ContextPolicy) -> str:
 
 
 # ── helpers ──────────────────────────────────────────────────────
+
+def _input_artifacts_block(task: ReproTask) -> str:
+    """Structured upstream artifacts block — empty when none given."""
+    if not task.input_artifacts:
+        return ""
+    lines = [
+        "\n## Input Artifacts",
+        "",
+        "Artifacts produced by upstream tasks — read these files directly "
+        "instead of re-deriving paths:",
+    ]
+    for item in task.input_artifacts:
+        path = str(item.get("path", ""))
+        description = str(item.get("description", ""))
+        lines.append(f"- {path}" + (f" — {description}" if description else ""))
+    return "\n".join(lines)
+
 
 def _source_line(task: ReproTask) -> str:
     """One-line description of where the workspace came from."""

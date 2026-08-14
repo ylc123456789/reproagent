@@ -144,6 +144,57 @@ def test_env_setup_uses_resolved_repo_path(tmp_path, monkeypatch):
     assert captured["repo_path"] == external
 
 
+def test_certification_gate_blocks_experiment_before_audit(tmp_path):
+    """No experiment command runs before a successful environment audit —
+    regardless of the LLM's stage label."""
+    task = ReproTask(repo_url="repo", workspace_dir=tmp_path, mock_llm=True)
+    state = AgentState(task=task)  # last_audit is None
+
+    for stage_hint in ("environment", "probe", "experiment"):
+        action = AgentAction(
+            thinking="try", action="run_commands", stage_hint=stage_hint,
+            commands=["python train.py"],
+        )
+        observation = _tool_run_commands(action, state)
+        assert not observation.command_results
+        assert "not yet certified" in observation.error
+
+
+def test_certification_gate_allows_repair_commands(tmp_path):
+    """Dependency repair (pip-family) and inspection stay available pre-audit."""
+    task = ReproTask(repo_url="repo", workspace_dir=tmp_path, mock_llm=True)
+    state = AgentState(task=task)
+    action = AgentAction(
+        thinking="repair", action="run_commands", stage_hint="environment",
+        commands=["echo repair", "pwd"],
+    )
+
+    observation = _tool_run_commands(action, state)
+
+    assert len(observation.command_results) == 2
+    assert all(r.exit_code == 0 for r in observation.command_results)
+
+
+def test_certification_gate_lifts_after_successful_audit(tmp_path):
+    """After a successful audit, experiment commands pass the gate."""
+    from reproagent.models import EnvironmentAudit
+
+    task = ReproTask(repo_url="repo", workspace_dir=tmp_path, mock_llm=True)
+    state = AgentState(
+        task=task,
+        last_audit=EnvironmentAudit(success=True, summary="passed"),
+    )
+    action = AgentAction(
+        thinking="run", action="run_commands", stage_hint="experiment",
+        commands=["python -c \"print('epoch 1')\""],
+    )
+
+    observation = _tool_run_commands(action, state)
+
+    assert observation.command_results
+    assert observation.command_results[0].exit_code == 0
+
+
 def test_setup_only_mock_run_with_successful_audit_completes(tmp_path, monkeypatch):
     """With a passing audit, the mock setup_only run completes."""
     import reproagent.controller.actions as actions_module

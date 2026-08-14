@@ -295,3 +295,51 @@ def test_bindings_legacy_zero_source_resume_writes_valid_mode(tmp_path):
     repo_binding = _read_yaml(tmp_path / "session.yaml")["bindings"]["repo"]
     assert repo_binding["mode"] == "isolated"  # never "resume"
     assert repo_binding["path"] == str(repo)
+
+
+def test_key_artifacts_register_existing_evidence(tmp_path):
+    """key_artifacts list real existing paths: result, audit, experiment logs."""
+    from reproagent.models import (
+        AgentObservation,
+        AgentState,
+        CommandResult,
+        EnvironmentAudit,
+        RepoContext,
+    )
+    from reproagent.session import _read_yaml
+
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    train_stdout = logs / "experiment_01_01.stdout"
+    train_stdout.write_text("Epoch 1 | loss 0.5", encoding="utf-8")
+    audit_out = logs / "environment_audit.stdout"
+    audit_out.write_text("audit ok", encoding="utf-8")
+    (tmp_path / "result.md").write_text("# result", encoding="utf-8")
+
+    state = AgentState(
+        task=ReproTask(repo_url="r", workspace_dir=tmp_path),
+        repo_context=RepoContext(repo_path=tmp_path / "repo"),
+        last_audit=EnvironmentAudit(success=True, summary="passed", stdout_path=audit_out),
+        status="completed",
+        steps=[AgentObservation(
+            step=1, action="run_commands", stage_hint="experiment",
+            command_results=[CommandResult(
+                command="python train.py", exit_code=0,
+                stdout_path=train_stdout,
+                stderr_path=logs / "experiment_01_01.stderr",
+                duration_seconds=1.0,
+            )],
+        )],
+    )
+    write_session_card(state)
+
+    card = _read_yaml(tmp_path / "session.yaml")
+    artifacts = card["key_artifacts"]
+    by_type = {a["type"]: a for a in artifacts}
+    assert set(by_type) == {"experiment_result", "environment_audit", "experiment_log"}
+    assert by_type["experiment_result"]["path"] == "result.md"
+    assert by_type["environment_audit"]["path"] == "logs/environment_audit.stdout"
+    assert by_type["experiment_log"]["path"] == "logs/experiment_01_01.stdout"
+    # every registered path exists on disk
+    for artifact in artifacts:
+        assert (tmp_path / artifact["path"]).exists(), artifact["path"]
