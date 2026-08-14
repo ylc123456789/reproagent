@@ -7,6 +7,25 @@ research repositories. Reproduction is one of its modes — when a paper is give
 the goal is reproducing that paper; otherwise the goal is the experiment goal
 exactly as specified.
 
+### Capability card
+
+`agent.yaml` at the repository root declares the module's role and capabilities
+for the ResAgent CapabilityRegistry (scientific orchestration V2):
+
+```yaml
+name: reproagent
+role: experiment_operator
+capabilities: [reproduce_experiment, execute_experiment]
+side_effects: workspace_and_environment
+input_contract: ReproTask
+output_contract: AgentState/repro_result
+```
+
+The operator produces experiment EVIDENCE (logs, raw metrics, session
+bindings) — never final scientific conclusions. `modify_code`,
+`analyze_results`, and `search_literature` belong to other modules and
+must not be declared here. `tests/test_agent_card.py` locks these fields.
+
 Input:
 
 ```text

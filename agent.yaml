@@ -1,0 +1,23 @@
+# Experiment Operator capability card — scientific orchestration V2.
+#
+# This file is the single source of truth for capability -> executor
+# routing: the ResAgent CapabilityRegistry loads it and both the chat
+# router and the research controller resolve capabilities from it.
+#
+# Rules:
+# - Declare only capabilities this module OWNS. modify_code belongs to
+#   CodingAgent; analyze_results and search_literature belong to
+#   ExpAgent. A duplicate declaration across modules is a config error.
+# - The capability vocabulary is frozen: reproduce_experiment,
+#   execute_experiment, modify_code, analyze_results, search_literature.
+name: reproagent
+role: experiment_operator
+capabilities:
+  - reproduce_experiment
+  - execute_experiment
+side_effects: workspace_and_environment
+input_contract: ReproTask
+output_contract: AgentState/repro_result
+status: available
+description: LLM-driven experiment operator for ML research repositories — prepares or binds a conda environment, probes the repository, runs experiments, and collects metric evidence from command logs.
+output_semantics: Experiment EVIDENCE only — logs, raw metrics, and session bindings. Final scientific conclusions belong to ExpAgent, never the operator.
