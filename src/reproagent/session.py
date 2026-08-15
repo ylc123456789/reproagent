@@ -11,6 +11,8 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+import yaml
+
 from .models import AgentState
 from .repository.context import workspace_mode
 
@@ -223,119 +225,22 @@ def _resolve_pip_cache(workspace_dir: Path, state: AgentState) -> str:
 def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-
 def _write_yaml(path: Path, data: dict) -> None:
-    """Minimal yaml writer — no pyyaml dependency."""
-    lines: list[str] = []
-    _dict_to_lines(data, lines, indent=0)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    """Serialize the card with a real YAML library.
 
-
-def _dict_to_lines(data: dict, lines: list[str], indent: int) -> None:
-    prefix = "  " * indent
-    for key, value in data.items():
-        if isinstance(value, dict):
-            lines.append(f"{prefix}{key}:")
-            _dict_to_lines(value, lines, indent + 1)
-        elif isinstance(value, list):
-            if not value:
-                lines.append(f"{prefix}{key}: []")
-                continue
-            lines.append(f"{prefix}{key}:")
-            for item in value:
-                if isinstance(item, dict):
-                    item_prefix = "  " * (indent + 1)
-                    first = True
-                    for ik, iv in item.items():
-                        if first:
-                            lines.append(f"{item_prefix}- {ik}: {_yaml_value(iv)}")
-                            first = False
-                        else:
-                            lines.append(f"{item_prefix}  {ik}: {_yaml_value(iv)}")
-                else:
-                    lines.append(f"{'  ' * (indent + 1)}- {_yaml_value(item)}")
-        else:
-            lines.append(f"{prefix}{key}: {_yaml_value(value)}")
-
-
-def _yaml_value(value) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if value is None:
-        return ""
-    # Fold all whitespace (incl. newlines) into single spaces: card fields are
-    # display text, and keeping one line per field keeps both this minimal
-    # reader and strict YAML parsers happy (multi-line values previously got
-    # truncated on read-back and could inject spurious keys).
-    s = " ".join(str(value).split())
-    if ":" in s or "#" in s or s.startswith(" ") or s.endswith(" "):
-        s = s.replace('"', '\\"')
-        return f'"{s}"'
-    return s
+    Session cards are the cross-module contract — readers (ResAgent) parse
+    with strict yaml.safe_load, so the writer must guarantee valid YAML.
+    The previous hand-rolled writer emitted invalid YAML whenever a summary
+    contained JSON fragments with quotes/backslashes (cloud regression
+    2026-08-15), corrupting the session index.
+    """
+    path.write_text(
+        yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
 
 
 def _read_yaml(path: Path) -> dict:
-    """Minimal yaml reader — no pyyaml dependency.
-
-    Supports the shapes the card writer emits: nested dicts and lists of
-    dicts (key_artifacts).  A `key:` line creates a dict placeholder; the
-    first `- item:` line under it converts it into a list.
-    """
-    import re
-    text = path.read_text(encoding="utf-8")
-    result: dict = {}
-    # (indent, container, key) — key is the parent's key holding the container
-    stack: list[tuple[int, dict | list, str | None]] = [(0, result, None)]
-    for raw in text.splitlines():
-        stripped = raw.rstrip()
-        if stripped == "" or stripped.lstrip().startswith("#"):
-            continue
-        m = re.match(r"^(\s*)(?:-\s)?([^:]+?):\s*(.*)", stripped)
-        if not m:
-            continue
-        indent = len(m.group(1))
-        key = m.group(2)
-        value = m.group(3).strip()
-        has_dash = bool(re.match(r"^\s*-\s", raw))
-        while len(stack) > 1 and stack[-1][0] >= indent:
-            stack.pop()
-        parent = stack[-1][1]
-        if has_dash:
-            container = stack[-1][1]
-            if not isinstance(container, list):
-                lst: list = []
-                if len(stack) >= 2:
-                    grandparent = stack[-2][1]
-                    parent_key = stack[-1][2]
-                    if isinstance(grandparent, dict) and parent_key is not None:
-                        grandparent[parent_key] = lst
-                stack[-1] = (stack[-1][0], lst, stack[-1][2])
-                container = lst
-            item: dict = {}
-            if value:
-                item[key] = _yaml_scalar(value)
-            container.append(item)
-            stack.append((indent, item, None))
-        elif value == "":
-            child: dict = {}
-            if isinstance(parent, list):
-                parent.append(child)
-                stack.append((indent, child, None))
-            else:
-                parent[key] = child
-                stack.append((indent, child, key))
-        else:
-            parsed = _yaml_scalar(value)
-            if isinstance(parent, list):
-                parent[-1][key] = parsed
-            else:
-                parent[key] = parsed
-    return result
-
-
-def _yaml_scalar(value: str):
-    if value in ("true", "True"):
-        return True
-    if value in ("false", "False"):
-        return False
-    return value.strip('"').strip("'")
+    """Parse a session card with the same strict YAML semantics readers use."""
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return data if isinstance(data, dict) else {}

@@ -385,3 +385,30 @@ def test_key_artifacts_prioritize_experiment_evidence(tmp_path):
     experiment_paths = [a["path"] for a in artifacts
                         if "experiment_08" in a["path"]]
     assert experiment_paths, "primary experiment log was dropped by the cap"
+
+
+def test_session_card_summary_with_json_payload_stays_valid_yaml(tmp_path):
+    """Regression (cloud regression 2026-08-15): JSON-in-summary corrupted cards.
+
+    A final_summary containing JSON fragments (quotes + backslashes) must
+    round-trip through a STRICT yaml.safe_load — that is the reader ResAgent
+    uses, and the hand-rolled writer used to emit unparseable YAML here.
+    """
+    import yaml
+
+    task = ReproTask(paper_url="p", repo_url="r", workspace_dir=tmp_path,
+                     experiment_goal="test", mock_llm=True, max_steps=3)
+    state = run_controller(task)
+    payload = ('{"thinking": "verify output via python -m json.tool showing '
+               '{\\"accuracy\\": 0.75, \\"loss\\": 0.25} - done"}')
+    state.final_summary = payload
+    state.status = "completed_with_failures"
+
+    write_session_card(state)
+
+    text = (tmp_path / "session.yaml").read_text(encoding="utf-8")
+    card = yaml.safe_load(text)  # the strict cross-module reader
+    assert card["summary"] == payload
+    assert card["status"] == "completed_with_failures"
+    # the module's own reader agrees
+    assert session_status(tmp_path)["session"]["summary"] == payload
