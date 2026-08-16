@@ -162,3 +162,101 @@ def resolved_fingerprint(resolved: dict) -> str:
         "abi_summary": resolved.get("abi_summary") or "",
     }
     return sha256_hex(canonical_dumps(normalized))
+
+
+# ── spec collection (the enumeration/selection rules are identity too) ─────
+
+# Dependency declarations joining identity, matched by NAME at any depth.
+# This set is normative: adding or dropping a name changes fingerprints.
+DEPENDENCY_FILE_NAMES = (
+    "environment.yml", "environment.yaml", "conda.yml", "conda.yaml",
+    "pyproject.toml", "setup.py", "setup.cfg",
+)
+_REQUIREMENTS_NAME = re.compile(r"requirements[^/]*\.(txt|in)")
+
+
+def collect_dependency_files(repo_path) -> list[dict]:
+    """Enumerate + hash dependency declarations, sorted by repo-relative
+    POSIX path. Hash is over the RAW BYTES (never decoded text)."""
+    from pathlib import Path
+    root = Path(repo_path)
+    files: list[dict] = []
+    for candidate in sorted(root.rglob("*")):
+        if not candidate.is_file():
+            continue
+        name = candidate.name
+        if (name in DEPENDENCY_FILE_NAMES or _REQUIREMENTS_NAME.fullmatch(name)
+                or name.endswith(".lock")):
+            try:
+                digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+            except OSError:
+                continue
+            files.append({"path": candidate.relative_to(root).as_posix(),
+                          "sha256": digest})
+    return sorted(files, key=lambda f: f["path"])
+
+
+def select_python_version(task_python: str, repo_path) -> str:
+    """Python identity: explicit task value > environment.yml pin > the
+    contract default. NEVER the caller's own interpreter — host state is
+    not identity."""
+    explicit = _major_minor(task_python)
+    if explicit:
+        return explicit
+    from pathlib import Path
+    for name in ("environment.yml", "environment.yaml"):
+        candidate = Path(repo_path) / name
+        if candidate.is_file():
+            try:
+                text = candidate.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            match = re.search(r"\bpython\s*[=~<>]?\s*(\d+\.\d+)", text)
+            if match:
+                return match.group(1)
+    return DEFAULT_PYTHON
+
+
+DEFAULT_PYTHON = "3.10"
+_CU_TAG = re.compile(r"\+cu(\d{2,3})\b")
+
+
+def constraint_cuda_variant(repo_path) -> str:
+    """Binary variant from explicit dependency constraints (+cu124 local
+    tags in dependency files). Conflicting variants resolve to ""
+    (ambiguous). Never inferred from drivers or the caller's installed
+    frameworks."""
+    from pathlib import Path
+    variants: set[str] = set()
+    for entry in collect_dependency_files(repo_path):
+        try:
+            text = (Path(repo_path) / entry["path"]).read_text(
+                encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for match in _CU_TAG.finditer(text):
+            variants.add(f"cu{match.group(1)}")
+    return variants.pop() if len(variants) == 1 else ""
+
+
+def _major_minor(version: str) -> str:
+    match = re.match(r"\s*(\d+\.\d+)", version or "")
+    return match.group(1) if match else ""
+
+
+def probe_gpu_usable(timeout: int = 15) -> bool:
+    """FEASIBILITY probe only — never identity. A GPU is usable when
+    nvidia-smi exits 0 and prints its standard header. Header formats vary
+    (driver CUDA vs WSL's "CUDA UMD Version"), so the check is the
+    NVIDIA-SMI banner, not a specific version field."""
+    import shutil
+    import subprocess
+    exe = shutil.which("nvidia-smi")
+    if not exe:
+        return False
+    try:
+        result = subprocess.run([exe], text=True, capture_output=True,
+                                timeout=timeout)
+    except Exception:
+        return False
+    return result.returncode == 0 and "NVIDIA-SMI" in (result.stdout or "")

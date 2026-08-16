@@ -101,19 +101,9 @@ def _probe_nvidia_smi(timeout: int = 10) -> str | None:
 
 
 def _constraint_cuda_variant(repo_path: Path) -> str:
-    """CUDA binary variant only from EXPLICIT dependency constraints
-    (e.g. torch==2.6.*+cu124 → cu124).  Conflicting variants resolve to
-    '' (ambiguous).  The driver's maximum supported CUDA is never mapped
-    into a wheel variant (13.0 != cu130)."""
-    variants: set[str] = set()
-    for entry in _dependency_files(repo_path):
-        try:
-            text = (Path(repo_path) / entry["path"]).read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        for match in _CU_VARIANT_RE.finditer(text):
-            variants.add("cu" + match.group(1))
-    return sorted(variants)[0] if len(variants) == 1 else ""
+    """CUDA binary variant from explicit dependency constraints.
+    The rule lives in the vendored contract file."""
+    return _contract.constraint_cuda_variant(repo_path)
 
 
 def _accelerator_spec(task, repo_path: Path, *, probe_log=None) -> dict:
@@ -127,7 +117,7 @@ def _accelerator_spec(task, repo_path: Path, *, probe_log=None) -> dict:
     variant = _constraint_cuda_variant(repo_path)
     if not getattr(task, "requires_gpu", False):
         return {"type": "cpu", "variant": variant}
-    if _probe_nvidia_smi() is not None:
+    if _contract.probe_gpu_usable():
         return {"type": "cuda", "variant": variant}
     if probe_log is not None:
         try:
@@ -143,23 +133,8 @@ def _accelerator_spec(task, repo_path: Path, *, probe_log=None) -> dict:
 
 
 def _dependency_files(repo_path: Path) -> list[dict]:
-    """Dependency declarations, sorted by repo-relative path, with the
-    SHA-256 of the RAW file bytes (never decode/transcode first)."""
-    files: list[dict] = []
-    for candidate in sorted(repo_path.rglob("*")):
-        if not candidate.is_file():
-            continue
-        rel = candidate.relative_to(repo_path)
-        name = rel.name
-        if (name in _DEPENDENCY_FILE_NAMES
-                or _REQUIREMENTS_PATTERN.fullmatch(name)
-                or name.endswith(".lock")):
-            try:
-                digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
-            except OSError:
-                continue
-            files.append({"path": str(rel), "sha256": digest})
-    return files
+    """Dependency declarations per the vendored contract's normative set."""
+    return _contract.collect_dependency_files(repo_path)
 
 
 def collect_environment_spec(task: ReproTask, repo_path: Path, *,
