@@ -276,6 +276,39 @@ def test_session_status_tolerates_legacy_card_without_bindings(tmp_path):
     assert info["session"]["session_id"] == "old-1"
 
 
+def test_bindings_content_addressed_fields(tmp_path, monkeypatch):
+    """Content-addressed mode registers manifest_path, prefix, and the
+    spec fingerprint in the environment binding (additive fields)."""
+    import reproagent.runtime.env_identity as identity_module
+    from reproagent.models import AgentState, EnvironmentInfo, RepoContext
+    from reproagent.session import _read_yaml
+
+    monkeypatch.setattr(identity_module.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(identity_module.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(identity_module.shutil, "which", lambda name: None)
+
+    root = tmp_path / "resources"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "requirements.txt").write_text("torch==2.6.0\n", encoding="utf-8")
+    task = ReproTask(
+        repo_url="https://github.com/org/demo.git", workspace_dir=tmp_path / "ws",
+        reuse_mode="content_addressed", resource_root=str(root),
+    )
+    state = AgentState(
+        task=task,
+        repo_context=RepoContext(repo_path=repo),
+        environment=EnvironmentInfo(env_name="resenv_x"),
+    )
+    write_session_card(state)
+
+    env_binding = _read_yaml(tmp_path / "ws" / "session.yaml")["bindings"]["environment"]
+    assert env_binding["manifest_path"].endswith("manifest.json")
+    assert "spec_fingerprint" in env_binding
+    assert len(env_binding["spec_fingerprint"]) == 64
+    assert "prefix" in env_binding
+
+
 def test_bindings_legacy_zero_source_resume_writes_valid_mode(tmp_path):
     """Resume of a legacy zero-source task still writes the repo binding,
     and the mode is never the non-contract value 'resume'."""

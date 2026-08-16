@@ -71,6 +71,9 @@ def resume_task(
         allow_code_delegation=orig_task.get("allow_code_delegation", True),
         env_name=orig_task.get("env_name", ""),
         input_artifacts=orig_task.get("input_artifacts", []),
+        project_ref=orig_task.get("project_ref", ""),
+        resource_root=orig_task.get("resource_root", ""),
+        reuse_mode=orig_task.get("reuse_mode", "legacy"),
     )
     old_state = AgentState.model_validate(state_data)
     old_state.attempt_count = getattr(old_state, "attempt_count", 1) + 1

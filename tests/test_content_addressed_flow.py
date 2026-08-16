@@ -164,6 +164,35 @@ def test_concurrent_same_spec_creates_once(tmp_path, monkeypatch):
     assert _create_count(create_log) == 1
 
 
+# ── audit-time manifest finalization ──────────────────────────────
+
+def test_audit_tool_finalizes_manifest(tmp_path, monkeypatch):
+    """A passing audit_env in content-addressed mode upgrades the manifest:
+    experiment certification, resolved fingerprint, audit artifact, usage."""
+    from reproagent.controller.actions import _tool_audit_env
+    from reproagent.models import AgentState
+
+    root = tmp_path / "resources"
+    inventory, create_log = _install_fake(tmp_path, monkeypatch)
+    state = _make_state(tmp_path, root, "https://github.com/org/demo.git")
+    info = env_module.ensure_environment(state)
+
+    agent_state = AgentState(
+        task=state.task,
+        repo_context=state.repo_context,
+        environment=EnvironmentInfo(env_name=info.env_name),
+    )
+    observation = _tool_audit_env(agent_state)
+
+    assert observation.audit is not None and observation.audit.success
+    manifest = env_manager.list_manifests(root)[0]
+    assert manifest["certification"] == "experiment"
+    assert manifest["audits"], "audit entry expected"
+    artifact_rel = manifest["audits"][0]["artifact"]
+    assert (env_manager.environments_dir(root) / manifest["env_id"] / artifact_rel).exists()
+    assert manifest["resolved_fingerprint"]
+
+
 # ── legacy regression ─────────────────────────────────────────────
 
 def test_default_legacy_mode_unchanged(tmp_path, monkeypatch):

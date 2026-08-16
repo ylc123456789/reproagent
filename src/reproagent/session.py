@@ -75,6 +75,9 @@ def write_session_card(state: AgentState, *, created_at: str | None = None, **ex
                 env_binding["audit_artifact"] = str(artifact.relative_to(ws))
             except ValueError:
                 env_binding["audit_artifact"] = str(artifact)
+        # Milestone-2: content-addressed envs register their manifest identity
+        # (additive; legacy cards without these fields stay readable).
+        _add_content_addressed_bindings(state, env_binding)
         bindings["environment"] = env_binding
     if state.task.dataset_cache_dir:
         bindings["dataset_cache"] = state.task.dataset_cache_dir
@@ -211,6 +214,35 @@ def session_status(workspace_dir: str | Path) -> dict:
 
 
 # ── helpers ────────────────────────────────────────────────────────
+
+def _add_content_addressed_bindings(state: AgentState, env_binding: dict) -> None:
+    """Best-effort milestone-2 fields: manifest_path, prefix, fingerprints."""
+    if state.task.reuse_mode != "content_addressed" or not state.task.resource_root:
+        return
+    repo_path = state.repo_context.repo_path if state.repo_context else None
+    if repo_path is None:
+        return
+    try:
+        from .runtime import env_manager
+        from .runtime.env_identity import (
+            collect_environment_spec,
+            env_id,
+            project_slug_for,
+            spec_fingerprint,
+        )
+
+        spec = collect_environment_spec(state.task, repo_path)
+        fingerprint = spec_fingerprint(spec)
+        identifier = env_id(project_slug_for(state.task), fingerprint)
+        env_binding["manifest_path"] = str(env_manager.manifest_path(state.task.resource_root, identifier))
+        env_binding["prefix"] = str(env_manager.conda_envs_dir(state.task.resource_root) / identifier)
+        env_binding["spec_fingerprint"] = fingerprint
+        manifest = env_manager.read_manifest(state.task.resource_root, identifier)
+        if manifest and manifest.get("resolved_fingerprint"):
+            env_binding["resolved_fingerprint"] = manifest["resolved_fingerprint"]
+    except Exception:
+        pass  # card fields are best-effort registrations, never fatal
+
 
 def _resolve_pip_cache(workspace_dir: Path, state: AgentState) -> str:
     """Resolve the actual pip cache path, matching runner._pip_cache_dir logic."""

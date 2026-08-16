@@ -376,6 +376,74 @@ def record_usage(root: str | Path, env_id: str, *, run_id: str = "", task_id: st
     return manifest
 
 
+def _task_run_id(task) -> str:
+    parent = task.parent_run or {}
+    return str(parent.get("run_id", ""))
+
+
+def _operator_audit_checks(audit) -> list[dict]:
+    """Map the reproagent environment audit onto ENVIRONMENT_AUDIT_V1 checks."""
+    checks: list[dict] = [{
+        "name": "policy",
+        "outcome": "pass",
+        "detail": audit.summary,
+        "evidence_path": str(audit.stdout_path)
+        if audit.stdout_path is not None and audit.stdout_path.exists() else "",
+    }]
+    details = audit.details or []
+    if any("torch" in detail.lower() for detail in details):
+        checks.append({"name": "framework_import", "outcome": "pass",
+                       "detail": next(d for d in details if "torch" in d.lower())})
+    if any("gpu" in detail.lower() or "cuda" in detail.lower() for detail in details):
+        checks.append({"name": "accelerator", "outcome": "pass",
+                       "detail": "CUDA-capable environment per audit"})
+    return checks
+
+
+def finalize_manifest_after_audit(state, audit) -> dict | None:
+    """After a successful operator audit in content-addressed mode: recompute
+    the inventory, update resolved_fingerprint, upgrade certification to
+    experiment (§6.3 — reproagent is the only experiment certifier), persist
+    the ENVIRONMENT_AUDIT_V1 artifact, and append usage.
+
+    Returns the updated manifest, or None when the mode does not apply.
+    """
+    from .env_identity import (
+        collect_environment_spec,
+        env_id,
+        project_slug_for,
+        resolved_fingerprint,
+        spec_fingerprint,
+    )
+    from .environment import find_conda
+
+    task = state.task
+    if task.reuse_mode != "content_addressed" or not task.resource_root:
+        return None
+    repo_path = state.repo_context.repo_path if state.repo_context else task.workspace_dir / "repo"
+    root = Path(task.resource_root).expanduser()
+    spec = collect_environment_spec(task, repo_path)
+    identifier = env_id(project_slug_for(task), spec_fingerprint(spec))
+    manifest = read_manifest(root, identifier)
+    if manifest is None:
+        return None  # unmanaged environment — nothing to finalize
+    conda = find_conda() or "conda"
+    inventory = collect_resolved_inventory(conda, manifest.get("prefix", ""))
+    fingerprint = resolved_fingerprint(inventory)
+    artifact = audit_artifact_v1(
+        env_id=identifier, level="experiment", outcome="pass",
+        resolved_fingerprint=fingerprint,
+        audited_by={"module": "reproagent", "run_id": _task_run_id(task), "task_id": task.task_id},
+        checks=_operator_audit_checks(audit),
+        notes=audit.summary,
+    )
+    return record_audit(
+        root, identifier, artifact=artifact, resolved=inventory,
+        resolved_fingerprint=fingerprint, certification="experiment",
+        usage={"run_id": _task_run_id(task), "task_id": task.task_id, "at": utcnow()},
+    )
+
+
 # ── cleanup plan (dry-run ONLY — apply belongs to M2-P4) ──────────
 
 def plan_cleanup(root: str | Path) -> dict:

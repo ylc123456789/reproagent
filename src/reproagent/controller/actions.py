@@ -200,11 +200,21 @@ def _tool_audit_env(state: AgentState) -> AgentObservation:
             audit=EnvironmentAudit(success=False, summary=str(exc)),
         )
     state.last_audit = audit
+    error = ""
+    if audit.success:
+        # Content-addressed mode: a passing audit finalizes the manifest
+        # (resolved inventory, experiment certification, audit artifact).
+        try:
+            from ..runtime import env_manager
+            env_manager.finalize_manifest_after_audit(state, audit)
+        except Exception as exc:
+            error = f"manifest finalization failed after successful audit: {exc}"
     return AgentObservation(
         step=len(state.steps) + 1,
         action="audit_env",
         stage_hint="audit",
         audit=audit,
+        error=error,
     )
 
 
