@@ -4,27 +4,27 @@
     {
       "name": "torch_cuda124",
       "spec": "spec/torch_cuda124.json",
-      "spec_fingerprint": "66630c82f6113079d7d193a02700f9b926417dedc0d35a44cfd35f53e1694d00"
+      "spec_fingerprint": "d11b09bbe1bfeef4461211dd9f8443b933635e9fe0df3df034a05caa1938fcbc"
     },
     {
       "name": "torch_cuda124_altpath",
       "spec": "spec/torch_cuda124_altpath.json",
-      "spec_fingerprint": "66630c82f6113079d7d193a02700f9b926417dedc0d35a44cfd35f53e1694d00"
+      "spec_fingerprint": "d11b09bbe1bfeef4461211dd9f8443b933635e9fe0df3df034a05caa1938fcbc"
     },
     {
       "name": "torch_cuda121",
       "spec": "spec/torch_cuda121.json",
-      "spec_fingerprint": "525242e13d0cda45e499f1dc0f68dd5e0938065bfa9f440eb5a13837e5f9759b"
+      "spec_fingerprint": "4f216d81b974acfaeb0772957a9edcc3de8b8dd263cabadb3b60b48deba4e173"
     },
     {
       "name": "torch_cpu",
       "spec": "spec/torch_cpu.json",
-      "spec_fingerprint": "a1f17bcaa1f306390e6736b2abe9c5e7874ac041a11f6d6f7cc0fb6be4a6e8a9"
+      "spec_fingerprint": "fb8983166d9da9b1b1669272e058c27f667315b7499d415093bb9095b62a1d9b"
     },
     {
       "name": "torch_cuda124_reqchange",
       "spec": "spec/torch_cuda124_reqchange.json",
-      "spec_fingerprint": "0202be1f268e2df2394fcd7ce47b76eee56d03484667babea007922bfa5b6c73"
+      "spec_fingerprint": "f4b3d1da11d1fdee19e10bfa3a4b9f1835c3fad0e02f1b5ab4e9637a0de7d152"
     }
   ],
   "equal": [
