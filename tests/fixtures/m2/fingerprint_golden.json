@@ -1,0 +1,50 @@
+{
+  "comment": "Golden fingerprints for ENVIRONMENT_SPEC_V1. Three repos must reproduce these byte-identically. Regenerate ONLY via scripts/m2_contract_check semantics; hand edits are forbidden.",
+  "cases": [
+    {
+      "name": "torch_cuda124",
+      "spec": "spec/torch_cuda124.json",
+      "spec_fingerprint": "66630c82f6113079d7d193a02700f9b926417dedc0d35a44cfd35f53e1694d00"
+    },
+    {
+      "name": "torch_cuda124_altpath",
+      "spec": "spec/torch_cuda124_altpath.json",
+      "spec_fingerprint": "66630c82f6113079d7d193a02700f9b926417dedc0d35a44cfd35f53e1694d00"
+    },
+    {
+      "name": "torch_cuda121",
+      "spec": "spec/torch_cuda121.json",
+      "spec_fingerprint": "525242e13d0cda45e499f1dc0f68dd5e0938065bfa9f440eb5a13837e5f9759b"
+    },
+    {
+      "name": "torch_cpu",
+      "spec": "spec/torch_cpu.json",
+      "spec_fingerprint": "a1f17bcaa1f306390e6736b2abe9c5e7874ac041a11f6d6f7cc0fb6be4a6e8a9"
+    },
+    {
+      "name": "torch_cuda124_reqchange",
+      "spec": "spec/torch_cuda124_reqchange.json",
+      "spec_fingerprint": "0202be1f268e2df2394fcd7ce47b76eee56d03484667babea007922bfa5b6c73"
+    }
+  ],
+  "equal": [
+    [
+      "torch_cuda124",
+      "torch_cuda124_altpath"
+    ]
+  ],
+  "distinct": [
+    [
+      "torch_cuda124",
+      "torch_cuda121"
+    ],
+    [
+      "torch_cuda124",
+      "torch_cpu"
+    ],
+    [
+      "torch_cuda124",
+      "torch_cuda124_reqchange"
+    ]
+  ]
+}

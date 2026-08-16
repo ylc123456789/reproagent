@@ -1,0 +1,17 @@
+{
+  "schema": "ENVIRONMENT_SPEC_V1",
+  "python": "3.11",
+  "os": "linux",
+  "arch": "x86_64",
+  "accelerator": {"type": "cuda", "variant": "cu124"},
+  "dependency_files": [
+    {
+      "path": "requirements.txt",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    }
+  ],
+  "channels": [],
+  "pip_index_profile": "aliyun",
+  "framework_constraints": ["torch==2.6.*"],
+  "notes": "requirements.txt content changed"
+}

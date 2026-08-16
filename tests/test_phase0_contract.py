@@ -83,6 +83,8 @@ def test_persisted_model_field_contracts(tmp_path) -> None:
         "copy_from", "external_repo_path", "setup_only", "allow_code_delegation",
         # P4 follow-up: explicit env binding + structured upstream artifacts
         "env_name", "input_artifacts",
+        # milestone-2 resource management (deliberate schema change)
+        "project_ref", "resource_root", "reuse_mode",
     ]
     assert list(AgentState.model_fields) == [
         "task", "repo_context", "environment", "last_audit", "coding_results",

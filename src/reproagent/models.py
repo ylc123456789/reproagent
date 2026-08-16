@@ -63,6 +63,12 @@ class ReproTask(BaseModel):
     # Structured upstream artifacts (prior measurements/files from other
     # modules). Rendered into prompts verbatim; optional.
     input_artifacts: list[dict] = Field(default_factory=list)
+    # Milestone-2 resource management (additive; legacy stays the default).
+    # project_ref is the orchestrated-mode slug source (§4.3); resource_root
+    # hosts manifests/locks/conda envs when reuse_mode=content_addressed.
+    project_ref: str = ""
+    resource_root: str = ""
+    reuse_mode: Literal["legacy", "content_addressed"] = "legacy"
 
 
 class RepoContext(BaseModel):
