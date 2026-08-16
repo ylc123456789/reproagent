@@ -473,3 +473,38 @@ def plan_cleanup(root: str | Path) -> dict:
                     "last_used_at": manifest.get("last_used_at"),
                 })
     return {"dry_run": True, "candidates": candidates}
+
+
+def delete_environment(root: str | Path, env_id: str) -> dict:
+    """Physically delete this module's env (prefix + manifest dir).
+
+    M2-P4 apply path. The caller (ResAgent cleanup) owns policy; this
+    function owns only identity and containment guards. Never raises.
+    """
+    import shutil
+
+    manifest = read_manifest(root, env_id)
+    if manifest is None:
+        return {"env_id": env_id, "deleted": False, "reason": "manifest_missing"}
+    if manifest.get("manager") != "reproagent":
+        return {"env_id": env_id, "deleted": False,
+                "reason": f"not_managed_by_reproagent:{manifest.get('manager', '')}"}
+
+    prefix_text = str(manifest.get("prefix", "") or "")
+    envs_root = conda_envs_dir(root).resolve()
+    if prefix_text:
+        resolved = Path(prefix_text).resolve()
+        if resolved != envs_root and envs_root not in resolved.parents:
+            # 越界保护: never delete anything outside the managed envs dir.
+            return {"env_id": env_id, "deleted": False,
+                    "reason": "prefix_outside_resource_root"}
+
+    try:
+        if prefix_text and Path(prefix_text).is_dir():
+            shutil.rmtree(prefix_text)
+        env_dir = environments_dir(root) / env_id
+        if env_dir.is_dir():
+            shutil.rmtree(env_dir)
+    except OSError as exc:
+        return {"env_id": env_id, "deleted": False, "reason": f"os_error:{exc}"}
+    return {"env_id": env_id, "deleted": True, "reason": ""}

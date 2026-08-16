@@ -209,3 +209,41 @@ def test_plan_cleanup_stale_creating_needs_dead_lock(tmp_path):
     live = env_manager.locks_dir(tmp_path) / f"{creating['spec_fingerprint']}.lock"
     live.write_text(json.dumps({"host": "x", "pid": os.getpid()}), encoding="utf-8")
     assert env_manager.plan_cleanup(tmp_path)["candidates"] == []
+
+
+# ── delete (M2-P4 apply path) ───────────────────────────────────────
+
+def test_delete_environment_guards_and_apply(tmp_path):
+    env_id = "resenv_demo_66630c82f611"
+    manifest = _manifest(tmp_path)
+    env_manager.write_manifest_atomic(tmp_path, env_id, manifest)
+    prefix = tmp_path / "conda-envs" / env_id
+    prefix.mkdir(parents=True)
+    (prefix / "marker.txt").write_text("x", encoding="utf-8")
+
+    # wrong manager is refused
+    other_id = "resenv_other_66630c82f611"
+    other = _manifest(tmp_path, env_id=other_id, manager="codingagent")
+    env_manager.write_manifest_atomic(tmp_path, other_id, other)
+    refused = env_manager.delete_environment(tmp_path, other_id)
+    assert refused["deleted"] is False
+    assert "not_managed" in refused["reason"]
+
+    # containment: prefix outside the resource root is never deleted
+    out_id = "resenv_out_66630c82f611"
+    outside = _manifest(tmp_path, env_id=out_id,
+                        prefix=str(tmp_path.parent / "outside-env"))
+    env_manager.write_manifest_atomic(tmp_path, out_id, outside)
+    refused = env_manager.delete_environment(tmp_path, out_id)
+    assert refused["deleted"] is False
+    assert refused["reason"] == "prefix_outside_resource_root"
+    assert env_manager.read_manifest(tmp_path, out_id) is not None  # manifest kept
+
+    # happy path: prefix and manifest dir both gone
+    result = env_manager.delete_environment(tmp_path, env_id)
+    assert result["deleted"] is True
+    assert not prefix.exists()
+    assert env_manager.read_manifest(tmp_path, env_id) is None
+
+    # missing manifest is a clean no-op
+    assert env_manager.delete_environment(tmp_path, "resenv_gone_000000000000")["deleted"] is False
