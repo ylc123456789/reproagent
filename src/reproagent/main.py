@@ -24,6 +24,10 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Existing repository to operate on in place (shared mode)")
     run.add_argument("--setup-only", action="store_true",
                      help="Prepare the environment and finish without running experiments")
+    run.add_argument("--resource-root", default="",
+                     help="Milestone-2 resource root (manifests, locks, conda envs)")
+    run.add_argument("--reuse-mode", default="legacy", choices=["legacy", "content_addressed"],
+                     help="Environment reuse mode (default: legacy)")
     run.add_argument("--workspace", required=True, type=Path, help="Run workspace directory")
     run.add_argument("--repo-cache-dir", type=Path, default=None, help="Optional local cache directory for cloned repos")
     run.add_argument("--mock-llm", action="store_true", help="Use deterministic mock LLM for local tests")
@@ -66,6 +70,16 @@ def build_parser() -> argparse.ArgumentParser:
     # --- status ---
     status_cmd = sub.add_parser("status")
     status_cmd.add_argument("workspace", type=Path, help="Path to a workspace directory")
+
+    # --- inspect (milestone-2) ---
+    inspect_cmd = sub.add_parser("inspect")
+    inspect_cmd.add_argument("--root", type=Path, required=True,
+                             help="Resource root directory to list environments from")
+
+    # --- prune (milestone-2, dry-run plan ONLY) ---
+    prune_cmd = sub.add_parser("prune")
+    prune_cmd.add_argument("--root", type=Path, required=True,
+                           help="Resource root directory; prints a dry-run cleanup plan")
     return parser
 
 
@@ -100,6 +114,8 @@ def _build_run_task(args) -> ReproTask:
         copy_from=args.copy_from,
         external_repo_path=args.external_repo,
         setup_only=args.setup_only,
+        resource_root=args.resource_root,
+        reuse_mode=args.reuse_mode,
     )
 
 
@@ -128,6 +144,36 @@ def main(argv: list[str] | None = None) -> None:
         info = session_status(args.workspace)
         import json
         print(json.dumps(info, indent=2, ensure_ascii=False, default=str))
+    elif args.command == "inspect":
+        _cmd_inspect(args)
+    elif args.command == "prune":
+        _cmd_prune(args)
+
+
+def _cmd_inspect(args) -> None:
+    """List environment manifests in a resource root."""
+    from .runtime import env_manager
+
+    manifests = env_manager.list_manifests(args.root)
+    if not manifests:
+        print("No environments found.")
+        return
+    print(f"{'ENV ID':<44} {'STATE':<10} {'CERT':<14} {'LAST USED'}")
+    for manifest in manifests:
+        print(f"{str(manifest.get('env_id', ''))[:43]:<44} "
+              f"{str(manifest.get('state', '')):<10} "
+              f"{str(manifest.get('certification', '')):<14} "
+              f"{manifest.get('last_used_at') or ''}")
+
+
+def _cmd_prune(args) -> None:
+    """Print a dry-run cleanup plan. Apply belongs to M2-P4 (ResAgent side)."""
+    import json
+
+    from .runtime import env_manager
+
+    plan = env_manager.plan_cleanup(args.root)
+    print(json.dumps(plan, indent=2, ensure_ascii=True))
 
 
 def _cmd_resume(args) -> None:

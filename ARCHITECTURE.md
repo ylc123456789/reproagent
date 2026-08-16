@@ -316,7 +316,53 @@ Phase 0 contract locks: public exports, CLI parameter set, SYSTEM_PROMPT and
 initial-context hashes, persisted model fields. A refactor must never change
 these; a deliberate behavior change must update them in its own commit.
 
-## 12. Not Yet Implemented
+## 12. Resource Management (Milestone-2, content-addressed environments)
+
+Opt-in via `reuse_mode=content_addressed` + `resource_root`; the default
+remains `legacy` (task/env_namespace naming, unchanged).
+
+### Identity
+
+- `runtime/env_identity.py` implements the frozen M2-P0 fingerprint
+  algorithm byte-identically (canonical JSON over the identity subset +
+  SHA-256). `spec_fingerprint` = requested spec; `resolved_fingerprint`
+  = actual installed inventory (drift detection).
+- `env_id = resenv_<project-slug>_<spec_fingerprint[:12]>`; the slug is a
+  human hint only. Orchestrated mode uses `project_ref`; standalone mode
+  uses the repo basename.
+
+### Resource root layout
+
+```text
+<resource_root>/
+  environments/<env_id>/{manifest.json, audits/, usage/}
+  locks/<spec_fingerprint>.lock
+  conda-envs/<env_id>/
+```
+
+### Lifecycle (all deterministic — the LLM never participates)
+
+1. spec → fingerprint → manifest lookup
+2. no candidate: per-fingerprint creation lock (O_EXCL, host/pid/heartbeat,
+   liveness-based stale recovery only) → creating manifest → `conda create
+   -p` → inventory → ready + usage
+3. ready: prefix check → inventory recompute → mismatch ⇒ manifest marked
+   `drifted` + structured blocker (§6.4 operator ruling — never
+   auto-recreate, never repair in place; M2-P3 decides)
+4. reuse runs a deterministic pre-reuse audit; passing records an
+   ENVIRONMENT_AUDIT_V1 artifact and upgrades certification to
+   `experiment` (reproagent is the only experiment certifier)
+5. a passing `audit_env` in the loop also finalizes the manifest
+   (resolved fingerprint, certification, audit artifact, usage)
+
+### Maintenance CLI
+
+```text
+reproagent inspect --root <root>   # list manifests
+reproagent prune   --root <root>   # dry-run cleanup plan ONLY (no apply — M2-P4)
+```
+
+## 13. Not Yet Implemented
 
 ```text
 Docker backend

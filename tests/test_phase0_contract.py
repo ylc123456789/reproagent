@@ -35,9 +35,11 @@ def test_public_package_contract() -> None:
 
 def test_cli_contract() -> None:
     commands = _subcommands(build_parser())
-    assert set(commands) == {"run", "resume", "list", "status"}
+    # milestone-2 (deliberate): inspect/prune maintenance subcommands added.
+    assert set(commands) == {"run", "resume", "list", "status", "inspect", "prune"}
     # experiment-operator contract v1 (O6): --copy-from/--external-repo/
     # --setup-only added deliberately; --paper/--repo became optional.
+    # milestone-2 (deliberate): --resource-root/--reuse-mode added.
     assert _options(commands["run"]) == {
         "-h", "--help", "--paper", "--repo", "--workspace", "--repo-cache-dir",
         "--mock-llm", "--model", "--api-base", "--api-key-env", "--backend",
@@ -46,6 +48,7 @@ def test_cli_contract() -> None:
         "--max-coding-agent-steps", "--codingagent-path", "--config",
         "--mirror-profile", "--mirror-strict", "--env-namespace", "--isolate-env",
         "--copy-from", "--external-repo", "--setup-only",
+        "--resource-root", "--reuse-mode",
     }
 
 
