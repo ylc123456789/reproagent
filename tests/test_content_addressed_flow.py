@@ -193,6 +193,74 @@ def test_audit_tool_finalizes_manifest(tmp_path, monkeypatch):
     assert manifest["resolved_fingerprint"]
 
 
+# ── env_name candidate semantics (M2-P1 fixup) ────────────────────
+
+def test_spec_change_with_stale_env_name_candidate_creates_new(tmp_path, monkeypatch):
+    """M2-P5 stage-3 shape: ResAgent injects the OLD env via env_name while
+    the spec has changed. The fingerprint is the identity authority — the
+    stale candidate must never be bound; a NEW env is created."""
+    root = tmp_path / "resources"
+    inventory, create_log = _install_fake(tmp_path, monkeypatch)
+
+    state_a = _make_state(tmp_path, root, "https://github.com/org/demo.git")
+    info_a = env_module.ensure_environment(state_a)
+    assert info_a.created is True
+    assert _create_count(create_log) == 1
+
+    state_b = _make_state(tmp_path, root, "https://github.com/org/demo.git")
+    (tmp_path / "repo" / "requirements.txt").write_text("torch==2.9.0\n", encoding="utf-8")
+    state_b.task.env_name = info_a.env_name  # stale injected candidate
+
+    info_b = env_module.ensure_environment(state_b)
+
+    assert info_b.created is True
+    assert info_b.env_name != info_a.env_name
+    assert _create_count(create_log) == 2
+    assert len(env_manager.list_manifests(root)) == 2
+
+
+def test_matching_env_name_candidate_reuses(tmp_path, monkeypatch):
+    """An env_name candidate that equals the fingerprint identity goes
+    through the normal verified reuse — zero creation."""
+    root = tmp_path / "resources"
+    inventory, create_log = _install_fake(tmp_path, monkeypatch)
+
+    state_a = _make_state(tmp_path, root, "https://github.com/org/demo.git")
+    info_a = env_module.ensure_environment(state_a)
+
+    state_b = _make_state(tmp_path, root, "https://github.com/org/demo.git")
+    state_b.task.env_name = info_a.env_name  # matching candidate
+
+    info_b = env_module.ensure_environment(state_b)
+
+    assert info_b.created is False
+    assert info_b.env_name == info_a.env_name
+    assert _create_count(create_log) == 1
+
+
+def test_legacy_explicit_env_name_binding_unchanged(tmp_path, monkeypatch):
+    """Legacy mode keeps the direct env_name binding; resource_root is inert."""
+    def fake_run(cmd, **kwargs):
+        if cmd[:3] == ["/fake/conda", "env", "list"]:
+            return subprocess.CompletedProcess(cmd, 0, '{"envs": ["/opt/conda/envs/target_env"]}', "")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(env_module, "find_conda", lambda: "/fake/conda")
+    monkeypatch.setattr(env_module.subprocess, "run", fake_run)
+
+    task = ReproTask(
+        workspace_dir=tmp_path / "ws",
+        env_name="target_env",
+        resource_root=str(tmp_path / "resources"),
+    )
+    state = ReproState(task=task, repo_context=RepoContext(repo_path=tmp_path / "repo"))
+    info = env_module.ensure_environment(state)
+
+    assert info.env_name == "target_env"
+    assert info.created is False
+    assert not (tmp_path / "resources").exists()
+
+
 # ── legacy regression ─────────────────────────────────────────────
 
 def test_default_legacy_mode_unchanged(tmp_path, monkeypatch):

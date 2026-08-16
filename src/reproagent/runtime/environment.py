@@ -28,8 +28,16 @@ def ensure_environment(state: ReproState) -> EnvironmentInfo:
     stdout_path = logs / "conda_setup.stdout"
     stderr_path = logs / "conda_setup.stderr"
 
+    if state.task.reuse_mode == "content_addressed":
+        # Content identity takes precedence over any env_name hint: in this
+        # mode env_name is only a ResAgent-injected CANDIDATE, never a
+        # direct binding. The fingerprint always decides.
+        if not state.task.resource_root:
+            raise RuntimeError("reuse_mode=content_addressed requires resource_root")
+        return _ensure_content_addressed(state, conda, stdout_path, stderr_path)
+
     if state.task.env_name:
-        # Explicit binding: use the referenced environment unchanged.
+        # Legacy explicit binding: use the referenced environment unchanged.
         # Never create a substitute; unresolvable references fail loudly.
         if _find_conda_env(conda, state.task.env_name) is None:
             raise RuntimeError(
@@ -45,11 +53,6 @@ def ensure_environment(state: ReproState) -> EnvironmentInfo:
             setup_stdout_path=stdout_path,
             setup_stderr_path=stderr_path,
         )
-
-    if state.task.reuse_mode == "content_addressed":
-        if not state.task.resource_root:
-            raise RuntimeError("reuse_mode=content_addressed requires resource_root")
-        return _ensure_content_addressed(state, conda, stdout_path, stderr_path)
 
     env_name = _env_name(state.task.task_id, namespace=state.task.env_namespace, isolate=state.task.isolate_env)
 
@@ -274,6 +277,24 @@ def _ensure_content_addressed(state, conda: str, stdout_path, stderr_path) -> En
     identifier = env_id(project_slug_for(task), fingerprint)
     prefix = str(env_manager.conda_envs_dir(root) / identifier)
     manifest_file = env_manager.manifest_path(root, identifier)
+
+    # env_name is only a CANDIDATE hint in this mode (ResAgent injects the
+    # manifest-candidate prefix).  The fingerprint is the identity
+    # authority: a candidate that equals the identifier or its prefix is
+    # simply what the lookup below would find anyway; a mismatching
+    # candidate is ignored and the fingerprint lookup/create proceeds.
+    candidate = (task.env_name or "").strip()
+    if candidate:
+        candidate_matches = (
+            candidate == identifier
+            or str(Path(candidate).expanduser()) == prefix
+        )
+        stdout_path.write_text(
+            f"env_name candidate {'matches' if candidate_matches else 'ignored (mismatch with fingerprint identity)'} "
+            f"{identifier}\n",
+            encoding="utf-8",
+        )
+        stderr_path.write_text("", encoding="utf-8")
 
     manifest = env_manager.read_manifest(root, identifier)
     if manifest is None:
