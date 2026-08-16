@@ -1,0 +1,194 @@
+"""Content-addressed ensure_environment: zero-creation reuse, concurrency,
+drift refusal, and legacy regression."""
+
+import subprocess
+import threading
+from pathlib import Path
+
+import pytest
+
+from reproagent.models import EnvironmentInfo, RepoContext, ReproState, ReproTask
+from reproagent.runtime import env_manager
+from reproagent.runtime import environment as env_module
+
+
+def _fake_conda_script(tmp_path: Path, inventory_file: Path, create_log: Path,
+                       create_sleep: float = 0.0) -> str:
+    """Executable Python dispatcher pretending to be conda.
+
+    `create -p <prefix>` logs into create_log (and can sleep to simulate a
+    slow creator); `run` probes answer from the mutable inventory file, so
+    tests can simulate drift by rewriting it.
+    """
+    fake = tmp_path / "fake-conda"
+    fake.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys, time, pathlib\n"
+        "args = sys.argv[1:]\n"
+        "if args[:2] == ['list', '-p']:\n"
+        "    print('[]')\n"
+        "elif args[0] == 'run':\n"
+        "    i = args.index('-p')\n"
+        "    cmd = args[-1]\n"
+        "    if cmd == 'python --version':\n"
+        "        print('Python 3.11.9')\n"
+        "    elif cmd.startswith('python -m pip'):\n"
+        "        inv = pathlib.Path(%r)\n"
+        "        print(inv.read_text() if inv.exists() else '[]')\n"
+        "    elif cmd.startswith('python -c'):\n"
+        "        print('{}')\n"
+        "elif args[0] == 'create' and args[1] == '-p':\n"
+        f"    time.sleep({create_sleep!r})\n"
+        "    pathlib.Path(args[2]).mkdir(parents=True, exist_ok=True)\n"
+        "    with open(%r, 'a') as f:\n"
+        "        f.write(args[2] + '\\n')\n"
+        "else:\n"
+        "    sys.exit(1)\n" % (str(inventory_file), str(create_log)),
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    return str(fake)
+
+
+def _make_state(tmp_path: Path, root: Path, repo_url: str) -> ReproState:
+    task = ReproTask(
+        workspace_dir=tmp_path / "ws",
+        reuse_mode="content_addressed",
+        resource_root=str(root),
+        python_version="3.10",
+        repo_url=repo_url,
+    )
+    repo = tmp_path / "repo"
+    repo.mkdir(exist_ok=True)
+    (repo / "requirements.txt").write_text("torch==2.6.0\n", encoding="utf-8")
+    return ReproState(task=task, repo_context=RepoContext(repo_path=repo))
+
+
+def _install_fake(tmp_path, monkeypatch, create_sleep: float = 0.0):
+    inventory = tmp_path / "pip-inventory.json"
+    inventory.write_text('[{"name": "torch", "version": "2.6.0"}]', encoding="utf-8")
+    create_log = tmp_path / "creates.log"
+    fake = _fake_conda_script(tmp_path, inventory, create_log, create_sleep=create_sleep)
+    monkeypatch.setattr(env_module, "find_conda", lambda: fake)
+    monkeypatch.setattr("reproagent.runtime.audit.find_conda", lambda: fake)
+    return inventory, create_log
+
+
+def _create_count(create_log: Path) -> int:
+    return len(create_log.read_text(encoding="utf-8").splitlines()) if create_log.exists() else 0
+
+
+# ── reuse / drift / config errors ─────────────────────────────────
+
+def test_same_spec_second_ensure_zero_creation(tmp_path, monkeypatch):
+    root = tmp_path / "resources"
+    inventory, create_log = _install_fake(tmp_path, monkeypatch)
+
+    first = env_module.ensure_environment(_make_state(tmp_path, root, "https://github.com/org/demo.git"))
+    assert first.created is True
+    assert _create_count(create_log) == 1
+
+    second = env_module.ensure_environment(_make_state(tmp_path, root, "https://github.com/org/demo.git"))
+    assert second.created is False
+    assert second.env_name == first.env_name
+    assert _create_count(create_log) == 1  # zero creation
+
+    manifests = env_manager.list_manifests(root)
+    assert len(manifests) == 1
+    assert manifests[0]["state"] == "ready"
+    assert manifests[0]["certification"] == "experiment"  # re-audited on reuse
+    assert len(manifests[0]["usage"]) == 2  # creator + reuser
+
+
+def test_drift_refuses_reuse_and_marks_manifest(tmp_path, monkeypatch):
+    root = tmp_path / "resources"
+    inventory, create_log = _install_fake(tmp_path, monkeypatch)
+    env_module.ensure_environment(_make_state(tmp_path, root, "https://github.com/org/demo.git"))
+
+    # manual pip install/uninstall → inventory changes → drift
+    inventory.write_text('[{"name": "torch", "version": "2.7.0"}]', encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="drift detected"):
+        env_module.ensure_environment(_make_state(tmp_path, root, "https://github.com/org/demo.git"))
+
+    manifest = env_manager.list_manifests(root)[0]
+    assert manifest["state"] == "drifted"
+    assert manifest["drift"]["expected"] != manifest["drift"]["actual"]
+
+
+def test_content_addressed_requires_resource_root(tmp_path):
+    task = ReproTask(workspace_dir=tmp_path / "ws", reuse_mode="content_addressed")
+    state = ReproState(task=task, repo_context=RepoContext(repo_path=tmp_path / "repo"))
+    with pytest.raises(RuntimeError, match="requires resource_root"):
+        env_module.ensure_environment(state)
+
+
+def test_drifted_manifest_refuses_reuse(tmp_path, monkeypatch):
+    root = tmp_path / "resources"
+    inventory, create_log = _install_fake(tmp_path, monkeypatch)
+    env_module.ensure_environment(_make_state(tmp_path, root, "https://github.com/org/demo.git"))
+
+    manifest = env_manager.list_manifests(root)[0]
+    env_manager.mark_drifted(root, manifest["env_id"], expected="a" * 64, actual="b" * 64)
+
+    with pytest.raises(RuntimeError, match="is drifted"):
+        env_module.ensure_environment(_make_state(tmp_path, root, "https://github.com/org/demo.git"))
+
+
+# ── concurrency ───────────────────────────────────────────────────
+
+def test_concurrent_same_spec_creates_once(tmp_path, monkeypatch):
+    root = tmp_path / "resources"
+    inventory, create_log = _install_fake(tmp_path, monkeypatch, create_sleep=1.0)
+    results: dict[str, object] = {}
+    barrier = threading.Barrier(2)
+
+    def worker(name: str) -> None:
+        state = _make_state(tmp_path, root, "https://github.com/org/demo.git")
+        barrier.wait()
+        try:
+            results[name] = env_module.ensure_environment(state)
+        except Exception as exc:  # noqa: BLE001 — surfaced via assertions
+            results[name] = exc
+
+    threads = [threading.Thread(target=worker, args=(name,)) for name in ("w0", "w1")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    infos = [r for r in results.values() if isinstance(r, EnvironmentInfo)]
+    assert len(infos) == 2, results
+    assert sum(1 for info in infos if info.created) == 1  # exactly one creator
+    assert all(info.env_name == infos[0].env_name for info in infos)
+    assert _create_count(create_log) == 1
+
+
+# ── legacy regression ─────────────────────────────────────────────
+
+def test_default_legacy_mode_unchanged(tmp_path, monkeypatch):
+    """reuse_mode defaults to legacy: naming, env-list probing, and creation
+    behave exactly as before the feature; resource_root is ignored."""
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[:3] == ["/fake/conda", "env", "list"]:
+            return subprocess.CompletedProcess(cmd, 0, '{"envs": []}', "")
+        if cmd[:2] == ["/fake/conda", "create"]:
+            return subprocess.CompletedProcess(cmd, 0, "created", "")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(env_module, "find_conda", lambda: "/fake/conda")
+    monkeypatch.setattr(env_module.subprocess, "run", fake_run)
+
+    task = ReproTask(
+        workspace_dir=tmp_path / "ws",
+        resource_root=str(tmp_path / "resources"),  # ignored in legacy mode
+    )
+    state = ReproState(task=task, repo_context=RepoContext(repo_path=tmp_path / "repo"))
+    info = env_module.ensure_environment(state)
+
+    assert info.created is True
+    assert info.env_name.startswith("repro_")  # legacy per-task naming
+    assert not (tmp_path / "resources" / "environments").exists()

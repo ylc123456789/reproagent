@@ -312,6 +312,70 @@ def collect_resolved_inventory(conda: str, prefix: str, timeout: int = 120) -> d
     return resolved
 
 
+# ── usage and audit records ───────────────────────────────────────
+
+def audit_artifact_v1(*, env_id: str, level: str, outcome: str,
+                      resolved_fingerprint: str, audited_by: dict,
+                      checks: list[dict], notes: str = "") -> dict:
+    """ENVIRONMENT_AUDIT_V1 record (experiment level only from reproagent)."""
+    stamp = utcnow().replace("-", "").replace(":", "")
+    import uuid
+    return {
+        "schema": "ENVIRONMENT_AUDIT_V1",
+        "audit_id": f"audit_{env_id}_{stamp}_{uuid.uuid4().hex[:6]}",
+        "env_id": env_id,
+        "level": level,
+        "outcome": outcome,
+        "resolved_fingerprint": resolved_fingerprint,
+        "audited_by": audited_by,
+        "at": utcnow(),
+        "checks": checks,
+        "notes": notes,
+    }
+
+
+def record_audit(root: str | Path, env_id: str, *, artifact: dict, resolved: dict,
+                 resolved_fingerprint: str, certification: str | None = None,
+                 usage: dict | None = None) -> dict:
+    """Persist the audit artifact JSON and update the manifest: audits entry,
+    inventory, optional certification upgrade, and usage/last_used_at."""
+    manifest = read_manifest(root, env_id)
+    if manifest is None:
+        raise ValueError(f"no manifest for {env_id}")
+    audits_dir(root, env_id).mkdir(parents=True, exist_ok=True)
+    rel = f"audits/{Path(artifact['audit_id']).name}.json"
+    artifact_path = environments_dir(root) / env_id / rel
+    artifact_path.write_text(json.dumps(artifact, indent=2, ensure_ascii=True), encoding="utf-8")
+
+    manifest["audits"].append({
+        "artifact": rel,
+        "level": artifact["level"],
+        "outcome": artifact["outcome"],
+        "at": artifact["at"],
+    })
+    if certification:
+        manifest["certification"] = certification
+    manifest["resolved"] = resolved
+    manifest["resolved_fingerprint"] = resolved_fingerprint
+    if usage:
+        manifest["usage"].append(usage)
+        manifest["last_used_at"] = usage["at"]
+    write_manifest_atomic(root, env_id, manifest)
+    return manifest
+
+
+def record_usage(root: str | Path, env_id: str, *, run_id: str = "", task_id: str = "") -> dict:
+    """Append a usage entry and refresh last_used_at."""
+    manifest = read_manifest(root, env_id)
+    if manifest is None:
+        raise ValueError(f"no manifest for {env_id}")
+    entry = {"run_id": run_id, "task_id": task_id, "at": utcnow()}
+    manifest["usage"].append(entry)
+    manifest["last_used_at"] = entry["at"]
+    write_manifest_atomic(root, env_id, manifest)
+    return manifest
+
+
 # ── cleanup plan (dry-run ONLY — apply belongs to M2-P4) ──────────
 
 def plan_cleanup(root: str | Path) -> dict:

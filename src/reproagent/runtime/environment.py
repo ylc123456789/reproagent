@@ -46,6 +46,11 @@ def ensure_environment(state: ReproState) -> EnvironmentInfo:
             setup_stderr_path=stderr_path,
         )
 
+    if state.task.reuse_mode == "content_addressed":
+        if not state.task.resource_root:
+            raise RuntimeError("reuse_mode=content_addressed requires resource_root")
+        return _ensure_content_addressed(state, conda, stdout_path, stderr_path)
+
     env_name = _env_name(state.task.task_id, namespace=state.task.env_namespace, isolate=state.task.isolate_env)
 
     if _conda_env_exists(conda, env_name):
@@ -222,3 +227,225 @@ def _find_conda_env(conda: str, env_ref: str) -> str | None:
         elif candidate.name == env_ref:
             return env_path
     return None
+
+
+# ── content-addressed reuse or create (milestone-2) ───────────────
+
+def _run_id(task) -> str:
+    parent = task.parent_run or {}
+    return str(parent.get("run_id", ""))
+
+
+def _drift_blocker(identifier: str, manifest_file: Path, expected, actual) -> RuntimeError:
+    """Structured blocker per the §6.4 operator ruling: refuse, never auto-
+    recreate (env_id collides) and never repair in place (global state)."""
+    return RuntimeError(
+        f"environment drift detected for {identifier} — refusing blind reuse.\n"
+        f"manifest: {manifest_file}\n"
+        f"expected resolved_fingerprint: {expected}\n"
+        f"actual   resolved_fingerprint: {actual}\n"
+        "The manifest has been marked drifted. Repair or recreate decisions "
+        "belong to M2-P3 (ResAgent resource selection)."
+    )
+
+
+def _ensure_content_addressed(state, conda: str, stdout_path, stderr_path) -> EnvironmentInfo:
+    """Exact reuse or create by content identity.
+
+    Deterministic: spec -> spec_fingerprint -> env_id -> manifest lookup ->
+    locked creation / verified reuse / structured refusal.  The LLM never
+    participates in any of these decisions.
+    """
+    from . import env_manager
+    from .audit import audit_environment
+    from .env_identity import (
+        collect_environment_spec,
+        env_id,
+        project_slug_for,
+        resolved_fingerprint,
+        spec_fingerprint,
+    )
+
+    task = state.task
+    repo_path = state.repo_context.repo_path if state.repo_context else task.workspace_dir / "repo"
+    root = Path(task.resource_root).expanduser()
+    spec = collect_environment_spec(task, repo_path)
+    fingerprint = spec_fingerprint(spec)
+    identifier = env_id(project_slug_for(task), fingerprint)
+    prefix = str(env_manager.conda_envs_dir(root) / identifier)
+    manifest_file = env_manager.manifest_path(root, identifier)
+
+    manifest = env_manager.read_manifest(root, identifier)
+    if manifest is None:
+        return _create_content_addressed(state, conda, root, identifier, prefix, spec,
+                                         fingerprint, stdout_path, stderr_path)
+
+    manifest_state = manifest.get("state")
+    if manifest_state == "creating":
+        lock = env_manager.read_lock(root, fingerprint)
+        holder_alive = lock is not None and env_manager._pid_alive(int(lock.get("pid", 0) or 0))
+        if holder_alive:
+            # An in-flight creator: wait for ready (reuse) or failed (retry).
+            return _wait_then_retry(state, conda, root, identifier, fingerprint,
+                                    stdout_path, stderr_path)
+        env_manager.mark_failed(root, identifier)  # creator died mid-creation
+        return _create_content_addressed(state, conda, root, identifier, prefix, spec,
+                                         fingerprint, stdout_path, stderr_path)
+
+    if manifest_state in ("drifted", "failed"):
+        raise RuntimeError(
+            f"environment {identifier} is {manifest_state} — refusing reuse. "
+            f"manifest: {manifest_file}. Remediation belongs to M2-P3."
+        )
+
+    # ready: verify the prefix, recompute the inventory, re-audit
+    if not Path(prefix).exists():
+        raise RuntimeError(
+            f"manifest for {identifier} is ready but its prefix is missing: {prefix}. "
+            f"Refusing reuse; manifest: {manifest_file}"
+        )
+    inventory = env_manager.collect_resolved_inventory(conda, prefix)
+    if not (inventory.get("python") and inventory.get("pip_inventory_sha256")
+            and inventory.get("conda_inventory_sha256")):
+        raise RuntimeError(
+            f"environment {identifier} inventory could not be verified — "
+            f"refusing reuse. manifest: {manifest_file}"
+        )
+    actual = resolved_fingerprint(inventory)
+    expected = manifest.get("resolved_fingerprint")
+    if actual != expected:
+        env_manager.mark_drifted(root, identifier, expected=expected, actual=actual,
+                                 details="resolved inventory mismatch at reuse time")
+        raise _drift_blocker(identifier, manifest_file, expected, actual)
+
+    info = EnvironmentInfo(
+        env_name=prefix,
+        created=False,
+        setup_stdout_path=stdout_path,
+        setup_stderr_path=stderr_path,
+    )
+    state.environment = info  # shim state: the caller replaces it anyway
+    audit = audit_environment(state)
+    if not audit.success:
+        raise RuntimeError(
+            f"environment {identifier} failed its pre-reuse audit: {audit.summary}. "
+            "The environment is NOT certified for experiments."
+        )
+    checks = [{
+        "name": "policy",
+        "outcome": "pass",
+        "detail": audit.summary,
+        "evidence_path": str(audit.stdout_path) if audit.stdout_path else "",
+    }]
+    artifact = env_manager.audit_artifact_v1(
+        env_id=identifier, level="experiment", outcome="pass",
+        resolved_fingerprint=actual,
+        audited_by={"module": "reproagent", "run_id": _run_id(task), "task_id": task.task_id},
+        checks=checks,
+    )
+    env_manager.record_audit(
+        root, identifier, artifact=artifact, resolved=inventory,
+        resolved_fingerprint=actual, certification="experiment",
+        usage={"run_id": _run_id(task), "task_id": task.task_id, "at": env_manager.utcnow()},
+    )
+    stdout_path.write_text(f"reused environment: {identifier} (fingerprint verified, audit passed)\n", encoding="utf-8")
+    stderr_path.write_text("", encoding="utf-8")
+    return info
+
+
+def _wait_then_retry(state, conda: str, root, identifier: str, fingerprint: str,
+                     stdout_path, stderr_path) -> EnvironmentInfo:
+    """Bounded wait for an in-flight creation, then re-dispatch on its outcome:
+    ready → reuse; failed / dead holder → re-create; timeout → structured error."""
+    from . import env_manager
+
+    deadline = time.monotonic() + 120
+    while True:
+        manifest = env_manager.read_manifest(root, identifier)
+        if manifest is None or manifest.get("state") in ("ready", "failed"):
+            return _ensure_content_addressed(state, conda, stdout_path, stderr_path)
+        lock = env_manager.read_lock(root, fingerprint)
+        holder_alive = lock is not None and env_manager._pid_alive(int(lock.get("pid", 0) or 0))
+        if not holder_alive:
+            return _ensure_content_addressed(state, conda, stdout_path, stderr_path)
+        if time.monotonic() > deadline:
+            raise RuntimeError(
+                f"timed out waiting for the in-flight creation of {identifier}; "
+                "retry after it finishes."
+            )
+        time.sleep(0.2)
+
+
+def _create_content_addressed(state, conda: str, root, identifier: str, prefix: str,
+                              spec: dict, fingerprint: str, stdout_path, stderr_path) -> EnvironmentInfo:
+    """Locked creation per §6.2: acquire, re-check, creating manifest, create,
+    inventory, ready.  A waiting caller that sees `ready` re-enters reuse."""
+    from . import env_manager
+    from .env_identity import resolved_fingerprint
+
+    task = state.task
+    repo_path = state.repo_context.repo_path if state.repo_context else task.workspace_dir / "repo"
+    deadline = time.monotonic() + 120
+    while True:
+        lock = env_manager.acquire_creation_lock(root, fingerprint)
+        if lock is not None:
+            break
+        manifest = env_manager.read_manifest(root, identifier)
+        if manifest is not None and manifest.get("state") == "ready":
+            # another creator finished while we waited — reuse it
+            return _ensure_content_addressed(state, conda, stdout_path, stderr_path)
+        if time.monotonic() > deadline:
+            raise RuntimeError(
+                f"timed out waiting for the concurrent creator of {identifier}; "
+                "retry after the in-flight creation finishes."
+            )
+        time.sleep(0.2)
+
+    try:
+        # re-check under the lock — the loser may have completed the env
+        manifest = env_manager.read_manifest(root, identifier)
+        if manifest is not None and manifest.get("state") == "ready":
+            env_manager.release_creation_lock(lock)
+            return _ensure_content_addressed(state, conda, stdout_path, stderr_path)
+
+        manifest = env_manager.new_manifest(
+            env_id=identifier,
+            prefix=prefix,
+            spec=spec,
+            spec_fingerprint=fingerprint,
+            created_by={"module": "reproagent", "run_id": _run_id(task), "task_id": task.task_id},
+            provenance={
+                "repo_path": str(repo_path),
+                "repo_origin": task.repo_url or "local",
+                "repo_commit": state.repo_context.commit_hash if state.repo_context else "",
+            },
+        )
+        env_manager.write_manifest_atomic(root, identifier, manifest)
+
+        create_cmd = [conda, "create", "-p", prefix, f"python={task.python_version}", "-y"]
+        result = _run_conda_setup_with_retries(
+            create_cmd,
+            cwd=repo_path,
+            timeout=task.timeout_seconds,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+        )
+        if result.returncode != 0:
+            env_manager.mark_failed(root, identifier)
+            raise RuntimeError(
+                f"conda environment creation failed for {identifier}; see {stderr_path}"
+            )
+
+        inventory = env_manager.collect_resolved_inventory(conda, prefix)
+        resolved = resolved_fingerprint(inventory)
+        env_manager.mark_ready(root, identifier, resolved, inventory)
+        env_manager.record_usage(root, identifier, run_id=_run_id(task), task_id=task.task_id)
+        return EnvironmentInfo(
+            env_name=prefix,
+            created=True,
+            setup_command=" ".join(create_cmd),
+            setup_stdout_path=stdout_path,
+            setup_stderr_path=stderr_path,
+        )
+    finally:
+        env_manager.release_creation_lock(lock)
