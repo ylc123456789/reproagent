@@ -69,6 +69,8 @@ class ReproTask(BaseModel):
     project_ref: str = ""
     resource_root: str = ""
     reuse_mode: Literal["legacy", "content_addressed"] = "legacy"
+    # GPU required by the task (spec collection: accelerator type identity).
+    requires_gpu: bool = False
 
 
 class RepoContext(BaseModel):

@@ -361,6 +361,39 @@ def test_spec_compliance_audit_fails_on_missing_package(tmp_path, monkeypatch):
     assert manifest["certification"] != "experiment"  # never finalized
 
 
+# ── lock recovery in the creation path ────────────────────────────
+
+def test_dead_local_lock_recovered_and_creation_continues(tmp_path, monkeypatch):
+    """A dead local process holding the creation lock is recovered — the
+    creation proceeds instead of waiting out the 120s timeout."""
+    import json
+    import socket
+    import subprocess as sp
+
+    from reproagent.runtime.env_identity import collect_environment_spec, spec_fingerprint
+
+    root = tmp_path / "resources"
+    inventory, create_log = _install_fake(tmp_path, monkeypatch)
+    state = _make_state(tmp_path, root, "https://github.com/org/demo.git")
+    fingerprint = spec_fingerprint(collect_environment_spec(state.task, tmp_path / "repo"))
+
+    proc = sp.Popen(["true"])
+    proc.wait()
+    locks_dir = env_manager.locks_dir(root)
+    locks_dir.mkdir(parents=True, exist_ok=True)
+    lock_file = locks_dir / f"{fingerprint}.lock"
+    lock_file.write_text(json.dumps({
+        "host": socket.gethostname(), "pid": proc.pid,
+        "started_at": "", "heartbeat_at": "",
+    }), encoding="utf-8")
+
+    info = env_module.ensure_environment(state)
+
+    assert info.created is True
+    assert _create_count(create_log) == 1
+    assert not lock_file.exists()  # recovered — no timeout wait
+
+
 # ── legacy regression ─────────────────────────────────────────────
 
 def test_default_legacy_mode_unchanged(tmp_path, monkeypatch):

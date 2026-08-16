@@ -87,7 +87,7 @@ def test_persisted_model_field_contracts(tmp_path) -> None:
         # P4 follow-up: explicit env binding + structured upstream artifacts
         "env_name", "input_artifacts",
         # milestone-2 resource management (deliberate schema change)
-        "project_ref", "resource_root", "reuse_mode",
+        "project_ref", "resource_root", "reuse_mode", "requires_gpu",
     ]
     assert list(AgentState.model_fields) == [
         "task", "repo_context", "environment", "last_audit", "coding_results",

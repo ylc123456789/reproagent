@@ -23,11 +23,10 @@ from ..models import ReproTask
 
 _DEPENDENCY_FILE_NAMES = (
     "environment.yml", "environment.yaml", "conda.yml", "conda.yaml",
-    "requirements.txt", "pyproject.toml", "setup.py",
-    "poetry.lock", "Pipfile.lock",
+    "requirements.txt", "pyproject.toml", "setup.py", "setup.cfg",
 )
 _REQUIREMENTS_PATTERN = re.compile(r"requirements[^/]*\.txt")
-_MIRROR_TO_INDEX = {"none": "", "cn": "aliyun", "autodl": "aliyun"}
+_CU_VARIANT_RE = re.compile(r"\+cu(\d{2,3})\b")
 
 
 # ── canonical serialization and fingerprints ──────────────────────
@@ -134,36 +133,80 @@ def _normalize_python_version(version: str) -> str:
     return match.group(1) if match else "3.10"
 
 
-def _detect_accelerator(timeout: int = 10) -> dict:
-    """Accelerator type + binary variant from nvidia-smi.
+def _probe_nvidia_smi(timeout: int = 10) -> str | None:
+    """Robust driver probe: the plain nvidia-smi header's `CUDA Version:
+    X.Y` line (no --query-gpu field dependency).  Returns the CUDA version
+    or None; never raises.
 
-    The CUDA driver version decides the binary variant: 12.4 → cu124.
-    No usable nvidia-smi → cpu.
+    FEASIBILITY-ONLY — the probed driver version NEVER enters identity.
     """
     exe = shutil.which("nvidia-smi")
     if not exe:
-        return {"type": "cpu", "variant": ""}
-    query = [exe, "--query-gpu=driver_version,cuda_version", "--format=csv,noheader,nounits"]
+        return None
     try:
-        result = subprocess.run(query, text=True, capture_output=True, timeout=timeout)
+        result = subprocess.run([exe], text=True, capture_output=True, timeout=timeout)
     except Exception:
-        return {"type": "cpu", "variant": ""}
-    if result.returncode != 0 or not result.stdout.strip():
-        return {"type": "cpu", "variant": ""}
-    cuda = result.stdout.strip().splitlines()[0].split(",")[-1].strip()
-    variant = "cu" + "".join(cuda.split(".")[:2]) if cuda else ""
-    return {"type": "cuda", "variant": variant}
+        return None
+    if result.returncode != 0:
+        return None
+    match = re.search(r"CUDA Version:\s*(\d+\.\d+)", result.stdout or "")
+    return match.group(1) if match else None
+
+
+def _constraint_cuda_variant(repo_path: Path) -> str:
+    """CUDA binary variant only from EXPLICIT dependency constraints
+    (e.g. torch==2.6.*+cu124 → cu124).  Conflicting variants resolve to
+    '' (ambiguous).  The driver's maximum supported CUDA is never mapped
+    into a wheel variant (13.0 != cu130)."""
+    variants: set[str] = set()
+    for entry in _dependency_files(repo_path):
+        try:
+            text = (Path(repo_path) / entry["path"]).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for match in _CU_VARIANT_RE.finditer(text):
+            variants.add("cu" + match.group(1))
+    return sorted(variants)[0] if len(variants) == 1 else ""
+
+
+def _accelerator_spec(task, repo_path: Path, *, probe_log=None) -> dict:
+    """Accelerator identity per the frozen collection semantics:
+
+    - type: requires_gpu AND a usable local GPU probe → cuda, else cpu
+    - variant: explicit task/dependency constraints only, else ""
+    - a failed probe with requires_gpu=True is a FEASIBILITY warning
+      written to the setup log — never a silent downgrade.
+    """
+    variant = _constraint_cuda_variant(repo_path)
+    if not getattr(task, "requires_gpu", False):
+        return {"type": "cpu", "variant": variant}
+    if _probe_nvidia_smi() is not None:
+        return {"type": "cuda", "variant": variant}
+    if probe_log is not None:
+        try:
+            with Path(probe_log).open("a", encoding="utf-8") as handle:
+                handle.write(
+                    "accelerator warning: requires_gpu=True but no usable "
+                    "nvidia-smi GPU probe — spec records cpu; GPU feasibility "
+                    "is unverified.\n"
+                )
+        except OSError:
+            pass
+    return {"type": "cpu", "variant": variant}
 
 
 def _dependency_files(repo_path: Path) -> list[dict]:
-    """Dependency declarations, sorted by repo-relative path, with content hash."""
+    """Dependency declarations, sorted by repo-relative path, with the
+    SHA-256 of the RAW file bytes (never decode/transcode first)."""
     files: list[dict] = []
     for candidate in sorted(repo_path.rglob("*")):
         if not candidate.is_file():
             continue
         rel = candidate.relative_to(repo_path)
         name = rel.name
-        if name in _DEPENDENCY_FILE_NAMES or _REQUIREMENTS_PATTERN.fullmatch(name):
+        if (name in _DEPENDENCY_FILE_NAMES
+                or _REQUIREMENTS_PATTERN.fullmatch(name)
+                or name.endswith(".lock")):
             try:
                 digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
             except OSError:
@@ -172,17 +215,23 @@ def _dependency_files(repo_path: Path) -> list[dict]:
     return files
 
 
-def collect_environment_spec(task: ReproTask, repo_path: Path) -> dict:
-    """Build the ENVIRONMENT_SPEC_V1 dict for this task + machine + repo."""
+def collect_environment_spec(task: ReproTask, repo_path: Path, *,
+                             probe_log: Path | None = None) -> dict:
+    """Build the ENVIRONMENT_SPEC_V1 dict for this task + machine + repo.
+
+    probe_log (setup stderr) receives the feasibility warning when
+    requires_gpu=True but the GPU probe fails — never a silent downgrade.
+    """
     return {
         "schema": "ENVIRONMENT_SPEC_V1",
         "python": _normalize_python_version(task.python_version),
         "os": _os_family(),
         "arch": _arch(),
-        "accelerator": _detect_accelerator(),
+        "accelerator": _accelerator_spec(task, Path(repo_path), probe_log=probe_log),
         "dependency_files": _dependency_files(Path(repo_path)),
         "channels": [],
-        "pip_index_profile": _MIRROR_TO_INDEX.get(task.mirror_profile, ""),
+        # The caller's mirror strategy NAME as-is; "" only when unset.
+        "pip_index_profile": "" if task.mirror_profile in ("", "none") else task.mirror_profile,
         "framework_constraints": [],
         "notes": "",
     }

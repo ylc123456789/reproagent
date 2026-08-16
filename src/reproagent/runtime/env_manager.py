@@ -222,17 +222,30 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def recover_stale_lock(root: str | Path, fingerprint: str) -> dict | None:
-    """Remove a creation lock whose holder is verifiably dead.
+def holder_alive(info: dict) -> bool:
+    """Conservative liveness for lock/lease holders.
 
-    A lock held by a live pid is never touched — recovery is liveness-
-    based only, never age-based.
+    A host different from ours is always treated as alive — shared
+    resource roots make remote processes unprobeable.  Local holders are
+    checked with kill(pid, 0).
+    """
+    host = str(info.get("host", "") or "")
+    if host and host != socket.gethostname():
+        return True
+    pid = int(info.get("pid", 0) or 0)
+    return pid > 0 and _pid_alive(pid)
+
+
+def recover_stale_lock(root: str | Path, fingerprint: str) -> dict | None:
+    """Remove a creation lock whose local holder is verifiably dead.
+
+    Locks held by a live pid or by a different host are never touched —
+    recovery is liveness-based only, never age-based.
     """
     info = read_lock(root, fingerprint)
     if info is None:
         return None
-    pid = int(info.get("pid", 0) or 0)
-    if pid > 0 and _pid_alive(pid):
+    if holder_alive(info):
         return None
     _lock_path(root, fingerprint).unlink(missing_ok=True)
     return info
@@ -587,7 +600,7 @@ def plan_cleanup(root: str | Path) -> dict:
             # stale creating is only a candidate when no live creator holds the lock
             fp = manifest.get("spec_fingerprint", "")
             lock = read_lock(root, fp) if fp else None
-            if lock is None or not _pid_alive(int(lock.get("pid", 0) or 0)):
+            if lock is None or not holder_alive(lock):
                 candidates.append({
                     "env_id": env_id,
                     "reason": "stale_creating",

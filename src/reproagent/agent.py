@@ -74,6 +74,7 @@ def resume_task(
         project_ref=orig_task.get("project_ref", ""),
         resource_root=orig_task.get("resource_root", ""),
         reuse_mode=orig_task.get("reuse_mode", "legacy"),
+        requires_gpu=orig_task.get("requires_gpu", False),
     )
     old_state = AgentState.model_validate(state_data)
     old_state.attempt_count = getattr(old_state, "attempt_count", 1) + 1

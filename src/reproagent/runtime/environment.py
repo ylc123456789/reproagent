@@ -239,6 +239,18 @@ def _run_id(task) -> str:
     return str(parent.get("run_id", ""))
 
 
+def _git_head(repo_path: Path) -> str:
+    """git HEAD of the repository, defensively ('' when unavailable)."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_path), "rev-parse", "HEAD"],
+            text=True, capture_output=True, timeout=10,
+        )
+    except Exception:
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
 def _drift_blocker(identifier: str, manifest_file: Path, expected, actual) -> RuntimeError:
     """Structured blocker per the §6.4 operator ruling: refuse, never auto-
     recreate (env_id collides) and never repair in place (global state)."""
@@ -272,7 +284,7 @@ def _ensure_content_addressed(state, conda: str, stdout_path, stderr_path) -> En
     task = state.task
     repo_path = state.repo_context.repo_path if state.repo_context else task.workspace_dir / "repo"
     root = Path(task.resource_root).expanduser()
-    spec = collect_environment_spec(task, repo_path)
+    spec = collect_environment_spec(task, repo_path, probe_log=stderr_path)
     fingerprint = spec_fingerprint(spec)
     identifier = env_id(project_slug_for(task), fingerprint)
     prefix = str(env_manager.conda_envs_dir(root) / identifier)
@@ -304,7 +316,7 @@ def _ensure_content_addressed(state, conda: str, stdout_path, stderr_path) -> En
     manifest_state = manifest.get("state")
     if manifest_state == "creating":
         lock = env_manager.read_lock(root, fingerprint)
-        holder_alive = lock is not None and env_manager._pid_alive(int(lock.get("pid", 0) or 0))
+        holder_alive = lock is not None and env_manager.holder_alive(lock)
         if holder_alive:
             # An in-flight creator: wait for ready (reuse) or failed (retry).
             return _wait_then_retry(state, conda, root, identifier, fingerprint,
@@ -402,8 +414,11 @@ def _wait_then_retry(state, conda: str, root, identifier: str, fingerprint: str,
         if manifest is None or manifest.get("state") in ("ready", "failed"):
             return _ensure_content_addressed(state, conda, stdout_path, stderr_path)
         lock = env_manager.read_lock(root, fingerprint)
-        holder_alive = lock is not None and env_manager._pid_alive(int(lock.get("pid", 0) or 0))
-        if not holder_alive:
+        if lock is not None and not env_manager.holder_alive(lock):
+            # Local dead holder — take over the lock instead of waiting it out.
+            env_manager.recover_stale_lock(root, fingerprint)
+            return _ensure_content_addressed(state, conda, stdout_path, stderr_path)
+        if lock is None:
             return _ensure_content_addressed(state, conda, stdout_path, stderr_path)
         if time.monotonic() > deadline:
             raise RuntimeError(
@@ -427,6 +442,9 @@ def _create_content_addressed(state, conda: str, root, identifier: str, prefix: 
         lock = env_manager.acquire_creation_lock(root, fingerprint)
         if lock is not None:
             break
+        if env_manager.recover_stale_lock(root, fingerprint) is not None:
+            # a local dead creator held the lock — recovered, retry acquisition
+            continue
         manifest = env_manager.read_manifest(root, identifier)
         if manifest is not None and manifest.get("state") == "ready":
             # another creator finished while we waited — reuse it
@@ -452,9 +470,13 @@ def _create_content_addressed(state, conda: str, root, identifier: str, prefix: 
             spec_fingerprint=fingerprint,
             created_by={"module": "reproagent", "run_id": _run_id(task), "task_id": task.task_id},
             provenance={
+                # collection semantics: repo_path (absolute) and repo_commit
+                # (git HEAD) are required provenance for stale-candidate culling
                 "repo_path": str(repo_path),
                 "repo_origin": task.repo_url or "local",
-                "repo_commit": state.repo_context.commit_hash if state.repo_context else "",
+                "repo_commit": (state.repo_context.commit_hash
+                                if state.repo_context and state.repo_context.commit_hash
+                                else _git_head(repo_path)),
             },
         )
         env_manager.write_manifest_atomic(root, identifier, manifest)

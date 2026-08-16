@@ -101,13 +101,15 @@ def test_lock_exclusive_and_reacquirable(tmp_path):
 
 
 def test_recover_stale_lock_requires_dead_holder(tmp_path):
+    import socket
+
     # live holder (this test process) — never recovered
     lock = env_manager.acquire_creation_lock(tmp_path, "f" * 64)
     assert env_manager.recover_stale_lock(tmp_path, "f" * 64) is None
     assert lock.exists()
     env_manager.release_creation_lock(lock)
 
-    # verifiably dead holder — recovered
+    # verifiably dead holder on OUR host — recovered
     dead = subprocess.run(["true"]).returncode  # noqa
     import subprocess as sp
     proc = sp.Popen(["true"])
@@ -115,12 +117,43 @@ def test_recover_stale_lock_requires_dead_holder(tmp_path):
     dead_pid = proc.pid
     locks_dir = env_manager.locks_dir(tmp_path)
     (locks_dir / f"{'f' * 64}.lock").write_text(
-        json.dumps({"host": "x", "pid": dead_pid, "started_at": "", "heartbeat_at": ""}),
+        json.dumps({"host": socket.gethostname(), "pid": dead_pid,
+                    "started_at": "", "heartbeat_at": ""}),
         encoding="utf-8",
     )
     recovered = env_manager.recover_stale_lock(tmp_path, "f" * 64)
     assert recovered is not None
     assert not (locks_dir / f"{'f' * 64}.lock").exists()
+
+
+def test_remote_host_lock_treated_alive(tmp_path):
+    """A lock held by a different host is conservatively alive — shared
+    resource roots make remote processes unprobeable."""
+    import socket
+    import subprocess as sp
+
+    proc = sp.Popen(["true"])
+    proc.wait()
+    locks_dir = env_manager.locks_dir(tmp_path)
+    locks_dir.mkdir(parents=True, exist_ok=True)
+    lock_file = locks_dir / f"{'f' * 64}.lock"
+    lock_file.write_text(json.dumps({
+        "host": "remote-host-42", "pid": proc.pid,  # dead pid, foreign host
+        "started_at": "", "heartbeat_at": "",
+    }), encoding="utf-8")
+
+    assert env_manager.holder_alive({"host": "remote-host-42", "pid": proc.pid}) is True
+    assert env_manager.recover_stale_lock(tmp_path, "f" * 64) is None
+    assert lock_file.exists()  # never taken over
+
+    # the same dead pid on OUR host is recoverable
+    lock_file.write_text(json.dumps({
+        "host": socket.gethostname(), "pid": proc.pid,
+        "started_at": "", "heartbeat_at": "",
+    }), encoding="utf-8")
+    assert env_manager.holder_alive({"host": socket.gethostname(), "pid": proc.pid}) is False
+    assert env_manager.recover_stale_lock(tmp_path, "f" * 64) is not None
+    assert not lock_file.exists()
 
 
 # ── resolved inventory (fake conda) ───────────────────────────────
@@ -193,6 +226,7 @@ def test_plan_cleanup_excludes_pinned_and_ready(tmp_path):
 
 
 def test_plan_cleanup_stale_creating_needs_dead_lock(tmp_path):
+    import socket
     import subprocess as sp
     creating = _manifest(tmp_path, env_id="resenv_stale_66630c82f611", state="creating")
     env_manager.write_manifest_atomic(tmp_path, creating["env_id"], creating)
@@ -200,14 +234,14 @@ def test_plan_cleanup_stale_creating_needs_dead_lock(tmp_path):
     proc.wait()
     env_manager.locks_dir(tmp_path).mkdir(parents=True, exist_ok=True)
     lock = env_manager.locks_dir(tmp_path) / f"{creating['spec_fingerprint']}.lock"
-    lock.write_text(json.dumps({"host": "x", "pid": proc.pid}), encoding="utf-8")
+    lock.write_text(json.dumps({"host": socket.gethostname(), "pid": proc.pid}), encoding="utf-8")
 
     plan = env_manager.plan_cleanup(tmp_path)
     assert [c["env_id"] for c in plan["candidates"]] == ["resenv_stale_66630c82f611"]
 
     # with a LIVE lock holder the stale creating is protected
     live = env_manager.locks_dir(tmp_path) / f"{creating['spec_fingerprint']}.lock"
-    live.write_text(json.dumps({"host": "x", "pid": os.getpid()}), encoding="utf-8")
+    live.write_text(json.dumps({"host": socket.gethostname(), "pid": os.getpid()}), encoding="utf-8")
     assert env_manager.plan_cleanup(tmp_path)["candidates"] == []
 
 
