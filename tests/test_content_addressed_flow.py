@@ -261,6 +261,106 @@ def test_legacy_explicit_env_name_binding_unchanged(tmp_path, monkeypatch):
     assert not (tmp_path / "resources").exists()
 
 
+# ── resolved fingerprint covers post-install inventory (fixup #2) ─
+
+def _agent_state(state, env_name):
+    from reproagent.models import AgentState
+
+    return AgentState(
+        task=state.task,
+        repo_context=state.repo_context,
+        environment=EnvironmentInfo(env_name=env_name),
+    )
+
+
+def test_finalize_after_install_reflects_new_packages(tmp_path, monkeypatch):
+    """After numpy+six are installed and audited, the manifest's resolved
+    fingerprint must differ from the numpy-only fingerprint — the post-
+    install inventory is the authoritative one."""
+    from reproagent.controller.actions import _tool_audit_env
+
+    root = tmp_path / "resources"
+    inventory, create_log = _install_fake(tmp_path, monkeypatch)
+    inventory.write_text('[{"name": "numpy", "version": "1.26.4"}]', encoding="utf-8")
+    state = _make_state(tmp_path, root, "https://github.com/org/demo.git")
+    (tmp_path / "repo" / "requirements.txt").write_text("numpy\n", encoding="utf-8")
+
+    info = env_module.ensure_environment(state)
+    agent = _agent_state(state, info.env_name)
+    observation = _tool_audit_env(agent)
+    assert observation.audit is not None and observation.audit.success
+    fingerprint_numpy = env_manager.list_manifests(root)[0]["resolved_fingerprint"]
+
+    # "pip install six": the inventory file is what the fake conda reports
+    inventory.write_text(
+        '[{"name": "numpy", "version": "1.26.4"}, {"name": "six", "version": "1.16.0"}]',
+        encoding="utf-8",
+    )
+    observation = _tool_audit_env(agent)
+
+    assert observation.audit is not None and observation.audit.success
+    fingerprint_both = env_manager.list_manifests(root)[0]["resolved_fingerprint"]
+    assert fingerprint_both != fingerprint_numpy
+    assert fingerprint_both
+
+
+def test_uninstall_then_reuse_triggers_drift(tmp_path, monkeypatch):
+    """Uninstall six (manual drift) → the next reuse recomputes a different
+    resolved fingerprint → drift marked + structured refusal."""
+    from reproagent.controller.actions import _tool_audit_env
+
+    root = tmp_path / "resources"
+    inventory, create_log = _install_fake(tmp_path, monkeypatch)
+    inventory.write_text(
+        '[{"name": "numpy", "version": "1.26.4"}, {"name": "six", "version": "1.16.0"}]',
+        encoding="utf-8",
+    )
+    state = _make_state(tmp_path, root, "https://github.com/org/demo.git")
+    (tmp_path / "repo" / "requirements.txt").write_text("numpy\nsix\n", encoding="utf-8")
+
+    info = env_module.ensure_environment(state)
+    observation = _tool_audit_env(_agent_state(state, info.env_name))
+    assert observation.audit is not None and observation.audit.success
+
+    # manual drift: six uninstalled outside any run
+    inventory.write_text('[{"name": "numpy", "version": "1.26.4"}]', encoding="utf-8")
+
+    # reuse with the SAME spec (no requirements rewrite — _make_state would
+    # change the file back and silently produce a different fingerprint)
+    reuse_task = ReproTask(
+        workspace_dir=tmp_path / "ws", reuse_mode="content_addressed",
+        resource_root=str(root), python_version="3.10",
+        repo_url="https://github.com/org/demo.git",
+    )
+    reuse_state = ReproState(task=reuse_task, repo_context=RepoContext(repo_path=tmp_path / "repo"))
+    with pytest.raises(RuntimeError, match="drift detected"):
+        env_module.ensure_environment(reuse_state)
+
+    manifest = env_manager.list_manifests(root)[0]
+    assert manifest["state"] == "drifted"
+
+
+def test_spec_compliance_audit_fails_on_missing_package(tmp_path, monkeypatch):
+    """The second drift line: a requirements-declared distribution missing
+    from the environment fails the audit (no finalization)."""
+    from reproagent.controller.actions import _tool_audit_env
+
+    root = tmp_path / "resources"
+    inventory, create_log = _install_fake(tmp_path, monkeypatch)
+    inventory.write_text('[{"name": "numpy", "version": "1.26.4"}]', encoding="utf-8")
+    state = _make_state(tmp_path, root, "https://github.com/org/demo.git")
+    (tmp_path / "repo" / "requirements.txt").write_text("numpy\nsix\n", encoding="utf-8")
+
+    info = env_module.ensure_environment(state)
+    observation = _tool_audit_env(_agent_state(state, info.env_name))
+
+    assert observation.audit is not None
+    assert observation.audit.success is False
+    assert any("missing distribution: six" in d for d in observation.audit.details)
+    manifest = env_manager.list_manifests(root)[0]
+    assert manifest["certification"] != "experiment"  # never finalized
+
+
 # ── legacy regression ─────────────────────────────────────────────
 
 def test_default_legacy_mode_unchanged(tmp_path, monkeypatch):

@@ -180,6 +180,14 @@ def _tool_run_commands(action: AgentAction, state: AgentState) -> AgentObservati
     # until a fresh audit_env succeeds.
     if results and mutating:
         state.last_audit = None
+        # Content-addressed bookkeeping: the manifest's recorded inventory
+        # no longer describes the mutated env — reset it until the next
+        # passing audit finalizes the new inventory.
+        try:
+            from ..runtime import env_manager
+            env_manager.invalidate_task_inventory(state)
+        except Exception:
+            pass  # bookkeeping only; the certification gate is the hard stop
     return AgentObservation(
         step=len(state.steps) + 1,
         action=action.action,
@@ -202,10 +210,28 @@ def _tool_audit_env(state: AgentState) -> AgentObservation:
     state.last_audit = audit
     error = ""
     if audit.success:
-        # Content-addressed mode: a passing audit finalizes the manifest
-        # (resolved inventory, experiment certification, audit artifact).
+        # Content-addressed mode: verify spec-declared distributions exist
+        # (second drift-detection line), then finalize the manifest —
+        # resolved inventory, experiment certification, audit artifact.
         try:
             from ..runtime import env_manager
+            violations = env_manager.check_task_spec_compliance(state)
+            if violations:
+                audit = EnvironmentAudit(
+                    success=False,
+                    summary="spec compliance failed",
+                    details=list(violations),
+                    stdout_path=audit.stdout_path,
+                    stderr_path=audit.stderr_path,
+                )
+                state.last_audit = audit
+                return AgentObservation(
+                    step=len(state.steps) + 1,
+                    action="audit_env",
+                    stage_hint="audit",
+                    audit=audit,
+                    error="spec compliance failed: " + "; ".join(violations),
+                )
             env_manager.finalize_manifest_after_audit(state, audit)
         except Exception as exc:
             error = f"manifest finalization failed after successful audit: {exc}"

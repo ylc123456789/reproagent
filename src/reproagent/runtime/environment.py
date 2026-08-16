@@ -334,6 +334,14 @@ def _ensure_content_addressed(state, conda: str, stdout_path, stderr_path) -> En
         )
     actual = resolved_fingerprint(inventory)
     expected = manifest.get("resolved_fingerprint")
+    if expected is None:
+        # Post-creation package changes were never finalized by a passing
+        # audit — the recorded inventory is unverifiable, refuse reuse.
+        raise RuntimeError(
+            f"environment {identifier} has no verified inventory — the creating "
+            f"run's installations were never finalized by a passing audit. "
+            f"Refusing reuse. manifest: {manifest_file}"
+        )
     if actual != expected:
         env_manager.mark_drifted(root, identifier, expected=expected, actual=actual,
                                  details="resolved inventory mismatch at reuse time")
@@ -351,6 +359,14 @@ def _ensure_content_addressed(state, conda: str, stdout_path, stderr_path) -> En
         raise RuntimeError(
             f"environment {identifier} failed its pre-reuse audit: {audit.summary}. "
             "The environment is NOT certified for experiments."
+        )
+    # Second drift line: spec-declared distributions must actually exist.
+    violations = env_manager.check_spec_compliance(
+        conda, prefix, env_manager.parse_requirements(repo_path))
+    if violations:
+        raise RuntimeError(
+            f"environment {identifier} failed spec compliance: "
+            + "; ".join(violations)
         )
     checks = [{
         "name": "policy",

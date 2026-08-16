@@ -444,6 +444,128 @@ def finalize_manifest_after_audit(state, audit) -> dict | None:
     )
 
 
+# ── inventory invalidation and spec compliance ────────────────────
+
+def invalidate_inventory(root: str | Path, env_id: str) -> dict | None:
+    """Package changes make the recorded inventory unverifiable.
+
+    Resets the ready manifest's resolved_fingerprint (and experiment
+    certification) until the next passing audit finalizes the new
+    inventory.  The in-memory certification gate is the hard stop; this
+    keeps the manifest from pretending to verify a mutated env.
+    """
+    manifest = read_manifest(root, env_id)
+    if manifest is None or manifest.get("state") != "ready":
+        return manifest
+    manifest["resolved_fingerprint"] = None
+    if manifest.get("certification") == "experiment":
+        manifest["certification"] = "none"
+    write_manifest_atomic(root, env_id, manifest)
+    return manifest
+
+
+def invalidate_task_inventory(state) -> None:
+    """Content-addressed bookkeeping after a package mutation (best-effort)."""
+    task = state.task
+    if task.reuse_mode != "content_addressed" or not task.resource_root:
+        return
+    try:
+        from .env_identity import (
+            collect_environment_spec,
+            env_id,
+            project_slug_for,
+            spec_fingerprint,
+        )
+
+        repo_path = state.repo_context.repo_path if state.repo_context else task.workspace_dir / "repo"
+        spec = collect_environment_spec(task, repo_path)
+        identifier = env_id(project_slug_for(task), spec_fingerprint(spec))
+        invalidate_inventory(task.resource_root, identifier)
+    except Exception:
+        pass  # bookkeeping only; the certification gate is the hard stop
+
+
+def parse_requirements(repo_path: Path) -> list[dict]:
+    """Parsed requirements*.txt entries: {name, constraint}.
+
+    Unparseable lines (editable, URL, option lines) are skipped; the
+    comparison is conservative — unknown operators degrade to presence
+    checks in check_spec_compliance.
+    """
+    entries: list[dict] = []
+    for req_file in sorted(Path(repo_path).glob("requirements*.txt")):
+        try:
+            lines = req_file.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for raw in lines:
+            line = raw.split("#", 1)[0].strip()
+            if not line or line.startswith(("-", "--", "git+", "http", "https")):
+                continue
+            name = line.split("=")[0].split("<")[0].split(">")[0].split("!")[0].split("[")[0].strip()
+            if not name:
+                continue
+            constraint = line[len(name):].strip() if len(name) < len(line) else ""
+            entries.append({"name": name.lower(), "constraint": constraint})
+    return entries
+
+
+def check_spec_compliance(conda: str, prefix: str, entries: list[dict],
+                          timeout: int = 120) -> list[str]:
+    """Verify requirements-declared distributions exist in the environment.
+
+    Returns violation strings; empty list means compliant.  This is the
+    second drift-detection line: even with a matching fingerprint, a
+    spec-declared package missing from the env fails the audit.
+    """
+    if not entries:
+        return []
+    result = _run_probe(
+        build_backend_command(prefix, "python -m pip list --format=json", conda=conda), timeout)
+    if result is None or result.returncode != 0:
+        return ["pip inventory unavailable — cannot verify spec compliance"]
+    try:
+        installed = {item["name"].lower(): str(item["version"]) for item in json.loads(result.stdout)}
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return ["pip inventory unparseable — cannot verify spec compliance"]
+    violations: list[str] = []
+    for entry in entries:
+        version = installed.get(entry["name"])
+        if version is None:
+            violations.append(f"missing distribution: {entry['name']}{entry['constraint']}")
+            continue
+        if entry["constraint"].startswith("==") and version != entry["constraint"][2:].strip():
+            violations.append(
+                f"{entry['name']}=={version} does not satisfy {entry['constraint']}")
+    return violations
+
+
+def check_task_spec_compliance(state) -> list[str]:
+    """Spec-compliance probe for the task's managed environment."""
+    task = state.task
+    if task.reuse_mode != "content_addressed" or not task.resource_root:
+        return []
+    try:
+        from .env_identity import (
+            collect_environment_spec,
+            env_id,
+            project_slug_for,
+            spec_fingerprint,
+        )
+        from .environment import find_conda
+
+        repo_path = state.repo_context.repo_path if state.repo_context else task.workspace_dir / "repo"
+        spec = collect_environment_spec(task, repo_path)
+        identifier = env_id(project_slug_for(task), spec_fingerprint(spec))
+        manifest = read_manifest(task.resource_root, identifier)
+        if manifest is None or manifest.get("state") != "ready":
+            return []
+        return check_spec_compliance(
+            find_conda() or "conda", manifest.get("prefix", ""), parse_requirements(repo_path))
+    except Exception as exc:
+        return [f"spec compliance probe failed: {exc}"]
+
+
 # ── cleanup plan (dry-run ONLY — apply belongs to M2-P4) ──────────
 
 def plan_cleanup(root: str | Path) -> dict:
