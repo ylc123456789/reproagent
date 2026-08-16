@@ -263,65 +263,42 @@ def _run_probe(cmd: list[str], timeout: int) -> subprocess.CompletedProcess[str]
 def collect_resolved_inventory(conda: str, prefix: str, timeout: int = 120) -> dict:
     """Normalized installed-inventory summary (manifest `resolved` object).
 
-    Every probe is defensive: a failure yields None for that field, and
-    callers treat an incomplete inventory as unverifiable.
+    Probes run inside the target env; normalization and hashing come from
+    the vendored contract file (the ONE implementation across repos).
+    A failed probe yields an empty inventory for that channel.
     """
-    resolved: dict = {
-        "python": None,
-        "conda_inventory_sha256": None,
-        "pip_inventory_sha256": None,
-        "frameworks": {},
-        "abi_summary": "",
-    }
+    from .._vendor import env_contract_v1 as _contract
 
     python_result = _run_probe(build_backend_command(prefix, "python --version", conda=conda), timeout)
+    python_text = ""
     if python_result is not None and python_result.returncode == 0:
-        text = (python_result.stdout or "").strip() or (python_result.stderr or "").strip()
-        if text.startswith("Python "):
-            resolved["python"] = text[len("Python "):].split()[0]
+        python_text = (python_result.stdout or "").strip() or (python_result.stderr or "").strip()
 
     pip_result = _run_probe(
         build_backend_command(prefix, "python -m pip list --format=json", conda=conda), timeout)
-    if pip_result is not None and pip_result.returncode == 0:
-        try:
-            resolved["pip_inventory_sha256"] = sha256_hex(canonical_dumps(json.loads(pip_result.stdout)))
-        except json.JSONDecodeError:
-            pass
+    pip_text = pip_result.stdout if pip_result is not None and pip_result.returncode == 0 else ""
 
     conda_result = _run_probe([conda, "list", "-p", prefix, "--json"], timeout)
-    if conda_result is not None and conda_result.returncode == 0:
-        try:
-            resolved["conda_inventory_sha256"] = sha256_hex(canonical_dumps(json.loads(conda_result.stdout)))
-        except json.JSONDecodeError:
-            pass
-
-    probe_code = (
-        "import importlib, json; out = {}\n"
-        "for name in ('torch', 'tensorflow', 'jax'):\n"
-        "    try:\n"
-        "        mod = importlib.import_module(name)\n"
-        "        info = {'version': str(getattr(mod, '__version__', ''))}\n"
-        "        if name == 'torch' and getattr(getattr(mod, 'version', None), 'cuda', None):\n"
-        "            info['cuda'] = str(mod.version.cuda)\n"
-        "        out[name] = info\n"
-        "    except Exception:\n"
-        "        pass\n"
-        "print(json.dumps(out))\n"
-    )
-    framework_result = _run_probe(
-        build_backend_command(prefix, "python -c " + shlex.quote(probe_code), conda=conda), timeout)
-    if framework_result is not None and framework_result.returncode == 0:
-        try:
-            resolved["frameworks"] = json.loads(framework_result.stdout)
-        except json.JSONDecodeError:
-            pass
+    conda_text = conda_result.stdout if conda_result is not None and conda_result.returncode == 0 else ""
 
     try:
         libc_name, libc_version = platform.libc_ver()
-        resolved["abi_summary"] = f"{libc_name}{libc_version}" if libc_name else ""
+        abi = f"{libc_name}{libc_version}" if libc_name else ""
     except Exception:
-        pass
+        abi = ""
 
+    resolved = _contract.build_resolved(
+        python_version=python_text,
+        pip_list_json=pip_text,
+        conda_list_json=conda_text,
+        abi_summary=abi,
+    )
+    if not python_text:
+        resolved["python"] = None  # callers treat incomplete as unverifiable
+    if not pip_text:
+        resolved["pip_inventory_sha256"] = None
+    if not conda_text:
+        resolved["conda_inventory_sha256"] = None
     return resolved
 
 

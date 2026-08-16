@@ -30,71 +30,19 @@ _CU_VARIANT_RE = re.compile(r"\+cu(\d{2,3})\b")
 
 
 # ── canonical serialization and fingerprints ──────────────────────
+# The algorithms live in ONE place: the vendored contract file (byte-
+# identical across the three repos; tests assert the sha256). This module
+# keeps only task-specific collection logic and re-exports the contract
+# functions for existing callers.
+from .._vendor import env_contract_v1 as _contract
 
-def canonical_dumps(obj) -> str:
-    """Canonical JSON: sorted keys, ASCII-safe, no insignificant whitespace."""
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-
-
-def sha256_hex(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def identity_subset(spec: dict) -> dict:
-    """The identity-bearing subset of ENVIRONMENT_SPEC_V1 (schema notes).
-
-    Fields not marked `identity: true` in the frozen schema (notes,
-    timestamps, absolute paths) never enter the fingerprint.
-    """
-    return {
-        "python": spec["python"],
-        "os": spec["os"],
-        "arch": spec["arch"],
-        "accelerator": {
-            "type": spec["accelerator"]["type"],
-            "variant": spec["accelerator"].get("variant", ""),
-        },
-        "dependency_files": [
-            {key: entry[key] for key in ("path", "sha256", "revision") if key in entry}
-            for entry in sorted(spec["dependency_files"], key=lambda entry: entry["path"])
-        ],
-        "channels": sorted(spec.get("channels", [])),
-        "framework_constraints": sorted(spec.get("framework_constraints", [])),
-    }
-
-
-def spec_fingerprint(spec: dict) -> str:
-    """Requested-environment identity (creation/lookup key)."""
-    return sha256_hex(canonical_dumps(identity_subset(spec)))
-
-
-def resolved_fingerprint(resolved: dict) -> str:
-    """Actual-inventory identity (drift detection).
-
-    Hashed over the manifest `resolved` object fields, which map 1:1 to
-    the milestone-2 identity inputs: python version, conda inventory,
-    pip inventory, framework versions/binary variants, ABI summary.
-    """
-    normalized = {
-        "python": resolved.get("python"),
-        "conda_inventory_sha256": resolved.get("conda_inventory_sha256"),
-        "pip_inventory_sha256": resolved.get("pip_inventory_sha256"),
-        "frameworks": resolved.get("frameworks") or {},
-        "abi_summary": resolved.get("abi_summary") or "",
-    }
-    return sha256_hex(canonical_dumps(normalized))
-
-
-def slug_project(name: str) -> str:
-    """Human-readable project slug per contracts/README.md rules."""
-    slug = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
-    return re.sub(r"-{2,}", "-", slug) or "project"
-
-
-def env_id(project: str, fingerprint: str) -> str:
-    """resenv_<project-slug>_<spec_fingerprint[:12]> — identity is the
-    fingerprint; the slug is a human hint only."""
-    return f"resenv_{slug_project(project)}_{fingerprint[:12]}"
+canonical_dumps = _contract.canonical_dumps
+sha256_hex = _contract.sha256_hex
+identity_subset = _contract.identity_subset
+spec_fingerprint = _contract.spec_fingerprint
+resolved_fingerprint = _contract.resolved_fingerprint
+slug_project = _contract.project_slug
+env_id = _contract.env_id
 
 
 def project_slug_for(task: ReproTask) -> str:

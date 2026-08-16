@@ -177,7 +177,7 @@ def _fake_conda(tmp_path) -> str:
         "  cmd=\"$1\"\n"
         "  case \"$cmd\" in\n"
         "    \"python --version\") echo 'Python 3.11.9' ;;\n"
-        "    \"python -m pip\"*) echo '[{\"name\": \"torch\", \"version\": \"2.6.0\"}]' ;;\n"
+        "    \"python -m pip\"*) echo '[{\"name\": \"torch\", \"version\": \"2.6.0+cu124\"}]' ;;\n"
         "    \"python -c\"*) echo '{\"torch\": {\"version\": \"2.6.0\", \"cuda\": \"12.4\"}}' ;;\n"
         "  esac\n"
         "elif [ \"$1\" = \"list\" ] && [ \"$2\" = \"-p\" ]; then\n"
