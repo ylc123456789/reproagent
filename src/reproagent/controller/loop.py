@@ -35,7 +35,21 @@ from .actions import (
     _tool_run_commands,
     _update_file_cache,
 )
-from .prompts import SETUP_ONLY_DIRECTIVE, SYSTEM_PROMPT, build_initial_context, build_turn_prompt
+from .prompts import (
+    SETUP_ONLY_DIRECTIVE,
+    SYSTEM_PROMPT,
+    build_initial_context,
+    build_turn_prompt,
+    convergence_guard,
+)
+
+
+def _experiment_run_count(state: AgentState) -> int:
+    """Number of executed run_commands actions tagged as experiment."""
+    return sum(
+        1 for s in state.steps
+        if s.action == "run_commands" and s.stage_hint == "experiment"
+    )
 
 
 def _log(message: str) -> None:
@@ -172,6 +186,9 @@ def run_controller(task: ReproTask, *, resume_state: AgentState | None = None) -
                                                 dataset_links=state.dataset_links)
         else:
             user_prompt = build_turn_prompt(state, policy)
+        guard = convergence_guard(_experiment_run_count(state))
+        if guard:
+            user_prompt += guard
         if task.setup_only:
             user_prompt += SETUP_ONLY_DIRECTIVE
 

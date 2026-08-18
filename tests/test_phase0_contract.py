@@ -65,11 +65,12 @@ def test_prompt_contracts() -> None:
         file_tree="README.md", readme_text="Phase 0 README", hardware_text="CPU test",
     )
     rendered = build_initial_context(task, repo, EnvironmentInfo(env_name="phase0", created=True))
-    # Deliberate behavior change (experiment-operator redesign O4 + P4 gate):
-    # system prompt repositioned as operator, workspace source line added,
-    # certification gate line added. Rendered initial context unchanged for
-    # tasks without input_artifacts.
-    assert _sha256(SYSTEM_PROMPT) == "755b4ea1f6b0abf571a4f11938b2a4e978bc2ca03d8e85969576b6f5e4e098ad"
+    # Deliberate behavior change (experiment-operator redesign O4 + P4 gate
+    # + reproduction convergence rules): system prompt repositioned as
+    # operator, workspace source line added, certification gate line added,
+    # stop-loss/diagnostic-halt/seed-is-variance rules added. Rendered initial
+    # context unchanged for tasks without input_artifacts.
+    assert _sha256(SYSTEM_PROMPT) == "9fc9c9f516a9477a6b18003778994bcecffc818f0281bb6355d74c493e17db53"
     assert _sha256(rendered) == "6e7189958b82342b63f92af19384d7aed115565ba7121e28ee5b1b1cccc70952"
 
 

@@ -1,6 +1,9 @@
 """Tests for the agent-loop controller."""
+import reproagent.controller.actions as actions_module
+import reproagent.llm as llm_module
 from reproagent.controller import run_controller
 from reproagent.controller.actions import _parse_action, _tool_run_commands
+from reproagent.controller.prompts import SYSTEM_PROMPT
 from reproagent.models import AgentAction, AgentState, ReproTask
 
 
@@ -441,3 +444,62 @@ def test_controller_delegation_disabled_exits_blocked(tmp_path, monkeypatch):
     # structured field for orchestrators — no text parsing needed
     blocked_obs = next(step for step in state.steps if step.action == "call_coding_agent")
     assert blocked_obs.coding_issues == ["missing loss"]
+
+
+def test_system_prompt_contains_convergence_rules():
+    """The reproduction-convergence section is present in the system prompt."""
+    assert "Stop-loss" in SYSTEM_PROMPT
+    assert "Diagnostic halt" in SYSTEM_PROMPT
+    assert "Seed is variance, not bias" in SYSTEM_PROMPT
+    assert "±1 percentage point" in SYSTEM_PROMPT
+
+
+def test_convergence_guard_injected_after_two_experiment_runs(tmp_path, monkeypatch):
+    """After two experiment-stage runs, the next prompt receives the strong
+    convergence guard that prevents seed-sweeping."""
+    from reproagent.models import CommandResult, EnvironmentAudit
+
+    prompts: list[str] = []
+
+    def _mock_response(user: str) -> str:
+        prompts.append(user)
+        if len(prompts) == 1:
+            return '{"thinking": "audit", "action": "audit_env"}'
+        if len(prompts) == 2:
+            return '{"thinking": "train1", "action": "run_commands", "stage_hint": "experiment", "commands": ["python train.py --seed=0"]}'
+        if len(prompts) == 3:
+            return '{"thinking": "train2", "action": "run_commands", "stage_hint": "experiment", "commands": ["python train.py --seed=1"]}'
+        return '{"thinking": "done", "action": "finish", "finish_status": "completed", "finish_summary": "done"}'
+
+    monkeypatch.setattr(llm_module, "mock_response", _mock_response)
+    monkeypatch.setattr(
+        actions_module, "audit_environment",
+        lambda state: EnvironmentAudit(success=True, summary="passed"),
+    )
+    monkeypatch.setattr(
+        actions_module, "_mock_run_commands",
+        lambda commands, state: [
+            CommandResult(
+                command=cmd, exit_code=0,
+                stdout_path=tmp_path / "o", stderr_path=tmp_path / "e",
+                duration_seconds=1.0,
+            )
+            for cmd in commands
+        ],
+    )
+
+    task = ReproTask(
+        repo_url="repo", workspace_dir=tmp_path / "run",
+        experiment_goal="reproduce x", mock_llm=True, max_steps=6,
+    )
+    state = run_controller(task)
+
+    assert state.status == "completed"
+    # prompts: initial, after audit, after run1, after run2 (guard injected here)
+    assert len(prompts) >= 4, f"got {len(prompts)} prompts"
+    # The prompt after the second experiment run must carry the guard.
+    post_second_run = prompts[3]
+    assert "Convergence guard" in post_second_run
+    assert "Do NOT" in post_second_run
+    assert "launch another training" in post_second_run
+    assert "seed-sweeping" in post_second_run
