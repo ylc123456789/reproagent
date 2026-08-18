@@ -68,9 +68,9 @@ def test_prompt_contracts() -> None:
     # Deliberate behavior change (experiment-operator redesign O4 + P4 gate
     # + reproduction convergence rules): system prompt repositioned as
     # operator, workspace source line added, certification gate line added,
-    # stop-loss/diagnostic-halt/seed-is-variance rules added. Rendered initial
-    # context unchanged for tasks without input_artifacts.
-    assert _sha256(SYSTEM_PROMPT) == "9fc9c9f516a9477a6b18003778994bcecffc818f0281bb6355d74c493e17db53"
+    # metric-agnostic stop-loss/diagnostic-halt/seed-is-variance rules added.
+    # Rendered initial context unchanged for tasks without input_artifacts.
+    assert _sha256(SYSTEM_PROMPT) == "d7553fca796151c2a96492869fb3058970f9ce5419681959665dddbbf10a59e5"
     assert _sha256(rendered) == "6e7189958b82342b63f92af19384d7aed115565ba7121e28ee5b1b1cccc70952"
 
 

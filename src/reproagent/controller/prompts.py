@@ -81,21 +81,26 @@ Your objective is a trustworthy measurement, not an exact match to every
 paper headline digit. Random seed is noise, not a knob for fixing
 systematic gaps.
 
-- **Stop-loss**: If your measured result is within a reasonable tolerance
-  of the stated target, finish and report success. For top-1 error or
-  accuracy, ±1 percentage point is usually acceptable unless the task
-  states a tighter tolerance. Explain the remaining gap in Deviations.
-- **Diagnostic halt**: If two consecutive full runs produce results within
-  ±0.5 percentage points of each other but still miss the target, do NOT
-  launch a third run with only a different random seed. Seed variation
-  cannot fix architecture, hyperparameter, or recipe mismatches. Instead,
-  inspect the code/model/training recipe (for example: is the model
-  ResNet18 when the paper uses PreActResNet18?), compare with the paper
-  or README, and either call call_coding_agent to fix the recipe or
-  finish with a Deviations section naming the likely root cause.
-- **Seed is variance, not bias**: multiple seeds are useful only to
-  estimate run-to-run variance. They do not reduce a stable ~1 percentage
-  point architecture/recipe gap.
+- **Stop-loss**: A result is "reproduced" when it falls inside a pre-defined
+  tolerance — a region of acceptable variability, not a bit-exact match.
+  Pick a tolerance appropriate to the metric (for accuracy/error this is
+  typically ±1 percentage point; for losses a small relative window; for
+  ranking or similarity scores, an appropriate equivalent). If the task
+  states an explicit tolerance, obey it. When your result is inside the
+  tolerance, finish and report success, and explain the remaining gap in
+  Deviations.
+- **Diagnostic halt**: If two consecutive full runs land within a small
+  window of each other (the result has plateaued) but still miss the
+  target, do NOT launch a third run with only a different random seed.
+  Seed variation cannot fix a systematic mismatch. Instead, localize the
+  mismatch to a concrete recipe dimension — model architecture, optimizer,
+  hyperparameters, data pipeline/augmentation, training schedule, or
+  library version — compare against the paper/README, and either call
+  call_coding_agent to correct that dimension, or finish with a Deviations
+  section naming the specific dimension and the direction of the gap.
+- **Seed is variance, not bias**: multiple seeds only estimate run-to-run
+  variance. They do not close a stable systematic gap caused by a recipe
+  mismatch.
 
 ### Reporting
 - When you call finish, your finish_summary must be a complete Markdown report
@@ -219,34 +224,6 @@ def build_turn_prompt(state: AgentState, policy: ContextPolicy) -> str:
 
 
 # ── helpers ──────────────────────────────────────────────────────
-
-def convergence_guard(experiment_run_count: int) -> str:
-    """Return a strong directive when the agent has already run multiple
-    experiments and risks chasing seeds instead of diagnosing.
-    """
-    if experiment_run_count < 2:
-        return ""
-    return f"""\
-
-## Convergence guard
-
-You have already executed {experiment_run_count} experiment run(s). Do NOT
-launch another training/evaluation run with only a different random seed
-or an otherwise identical configuration. Choose one of:
-
-1. If the latest result is within a reasonable tolerance of the target
-   (typically ±1 percentage point for accuracy/error), call finish with
-   status completed and explain the remaining gap in Deviations.
-2. If the result is still outside tolerance, call call_coding_agent to
-   investigate and fix the recipe (model architecture, hyperparameters,
-   data pipeline, or training script), then finish.
-3. If the code already matches the paper/README recipe and the gap is
-   stable, call finish with completed_with_failures and document the
-   systematic deviation.
-
-You must NOT burn more steps on seed-sweeping.
-"""
-
 
 def _input_artifacts_block(task: ReproTask) -> str:
     """Structured upstream artifacts block — empty when none given."""
