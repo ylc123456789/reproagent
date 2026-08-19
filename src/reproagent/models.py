@@ -31,7 +31,7 @@ class ReproTask(BaseModel):
     workspace_dir: Path
     repo_cache_dir: Path | None = None
     task_id: str = Field(default_factory=_task_id)
-    timeout_seconds: int = 1800
+    timeout_seconds: int = 3600
     max_steps: int = 30
     mock_llm: bool = False
     model: str | None = None

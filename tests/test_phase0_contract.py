@@ -69,9 +69,10 @@ def test_prompt_contracts() -> None:
     # + reproduction convergence rules): system prompt repositioned as
     # operator, workspace source line added, certification gate line added,
     # metric-agnostic stop-loss/diagnostic-halt/seed-is-variance rules added.
-    # Rendered initial context unchanged for tasks without input_artifacts.
+    # Rendered initial context differs from the original only by the default
+    # command timeout (Timeout: 1800s -> 3600s).
     assert _sha256(SYSTEM_PROMPT) == "d7553fca796151c2a96492869fb3058970f9ce5419681959665dddbbf10a59e5"
-    assert _sha256(rendered) == "6e7189958b82342b63f92af19384d7aed115565ba7121e28ee5b1b1cccc70952"
+    assert _sha256(rendered) == "76c15be7eac165cab081a0563404e04fa54c58c8b927013a7baa7949004ef441"
 
 
 def test_persisted_model_field_contracts(tmp_path) -> None:
