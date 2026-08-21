@@ -227,6 +227,12 @@ def run_controller(task: ReproTask, *, resume_state: AgentState | None = None) -
         else:  # finish
             state.status = action.finish_status or "completed"
             state.final_summary = action.finish_summary
+            state.structured_result = {
+                "metrics": action.finish_metrics,
+                "parameters": action.finish_parameters,
+                "deviations": action.finish_deviations,
+                "evidence_files": action.evidence_files,
+            }
             if task.setup_only:
                 # Deterministic gate: a setup-only task may only complete
                 # after a successful environment audit.

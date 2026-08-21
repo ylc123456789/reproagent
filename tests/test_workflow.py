@@ -14,11 +14,22 @@ def test_parse_action_run_commands():
 
 
 def test_parse_action_finish():
-    text = '{"thinking": "done", "action": "finish", "finish_status": "completed", "finish_summary": "All done."}'
+    text = (
+        'Result:\n```json\n{"thinking": "done", "action": "finish", '
+        '"finish_status": "completed", "finish_summary": "All done.", '
+        '"finish_metrics": {"accuracy": 0.91}, '
+        '"finish_parameters": {"epochs": 3}, '
+        '"finish_deviations": ["short run"], '
+        '"evidence_files": ["outputs/metrics.json"]}\n```'
+    )
     action = _parse_action(text)
     assert action is not None
     assert action.action == "finish"
     assert action.finish_status == "completed"
+    assert action.finish_metrics == {"accuracy": 0.91}
+    assert action.finish_parameters == {"epochs": 3}
+    assert action.finish_deviations == ["short run"]
+    assert action.evidence_files == ["outputs/metrics.json"]
 
 
 def test_parse_action_audit_env():

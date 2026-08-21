@@ -71,7 +71,7 @@ def test_prompt_contracts() -> None:
     # metric-agnostic stop-loss/diagnostic-halt/seed-is-variance rules added.
     # Rendered initial context differs from the original only by the default
     # command timeout (Timeout: 1800s -> 3600s).
-    assert _sha256(SYSTEM_PROMPT) == "d7553fca796151c2a96492869fb3058970f9ce5419681959665dddbbf10a59e5"
+    assert _sha256(SYSTEM_PROMPT) == "0d5333d5d957c087ad46a32c5a64fd68cd675b34eb0f22f96b7d378e8ec2960f"
     assert _sha256(rendered) == "76c15be7eac165cab081a0563404e04fa54c58c8b927013a7baa7949004ef441"
 
 
@@ -93,7 +93,7 @@ def test_persisted_model_field_contracts(tmp_path) -> None:
     ]
     assert list(AgentState.model_fields) == [
         "task", "repo_context", "environment", "last_audit", "coding_results",
-        "steps", "status", "final_summary", "result_path", "file_cache",
+        "steps", "status", "final_summary", "structured_result", "result_path", "file_cache",
         "produced_files", "attempt_count", "dataset_links",
     ]
     task = ReproTask(

@@ -12,6 +12,8 @@ import json
 import re
 import subprocess
 
+from pydantic import ValidationError
+
 from ..integrations.codingagent import run_coding_agent_for_patch
 from ..models import (
     AgentAction,
@@ -37,26 +39,24 @@ def _is_env_mutating_command(command: str) -> bool:
 
 def _parse_action(text: str) -> AgentAction | None:
     """Extract a valid JSON action from LLM response text. Returns None on parse failure."""
-    match = re.search(r"\{[^{}]*\"action\"[^{}]*\}", text, re.DOTALL)
-    if not match:
+    data = None
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(text):
+        if char != "{":
+            continue
+        try:
+            candidate, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, dict) and "action" in candidate:
+            data = candidate
+            break
+    if data is None:
         return None
     try:
-        data = json.loads(match.group(0))
-    except json.JSONDecodeError:
+        return AgentAction.model_validate(data)
+    except ValidationError:
         return None
-    action_type = data.get("action", "")
-    if action_type not in {"run_commands", "audit_env", "call_coding_agent", "finish"}:
-        return None
-    return AgentAction(
-        thinking=str(data.get("thinking", "")),
-        action=action_type,
-        stage_hint=str(data.get("stage_hint", "")),
-        commands=[str(c) for c in data.get("commands", [])],
-        coding_goal=str(data.get("coding_goal", "")),
-        coding_issues=[str(i) for i in data.get("coding_issues", [])],
-        finish_status=str(data.get("finish_status", "")),
-        finish_summary=str(data.get("finish_summary", "")),
-    )
 
 
 def _update_file_cache(state: AgentState, observation: AgentObservation) -> None:

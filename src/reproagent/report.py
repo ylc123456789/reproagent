@@ -1,6 +1,9 @@
-"""Write state.json and result.md."""
+"""Write human-readable and structured reproduction results."""
 from __future__ import annotations
 
+import hashlib
+import json
+import shutil
 from pathlib import Path
 
 from .models import AgentState, ReproAgentVersion, ReproState
@@ -121,9 +124,21 @@ def _clean_text(text: str) -> str:
 
 
 def write_agent_result(state: AgentState, version: ReproAgentVersion | None = None) -> Path:
-    """Write result.md + state.json for an agent-loop run."""
+    """Write result.md, result.json, frozen evidence, and state.json."""
     path = state.task.workspace_dir / "result.md"
     state.result_path = path
+    evidence, evidence_warnings = _freeze_evidence(state)
+    structured = {
+        "schema": "repro_result_v1",
+        "task_id": state.task.task_id,
+        "status": state.status,
+        "summary": state.final_summary,
+        "metrics": state.structured_result.get("metrics", {}),
+        "parameters": state.structured_result.get("parameters", {}),
+        "deviations": state.structured_result.get("deviations", []),
+        "evidence": evidence,
+        "warnings": evidence_warnings,
+    }
 
     attempt_label = f" (retry/resume)" if state.attempt_count > 1 else ""
     lines = [
@@ -203,15 +218,90 @@ def write_agent_result(state: AgentState, version: ReproAgentVersion | None = No
         "## Final Summary", "",
         state.final_summary or "No final summary.", "",
     ]
+    if evidence:
+        lines += ["## Frozen Evidence", ""]
+        lines += [f"- `{item['path']}` (sha256 `{item['sha256']}`)" for item in evidence]
+        lines.append("")
+    if evidence_warnings:
+        lines += ["## Evidence Warnings", ""]
+        lines += [f"- {warning}" for warning in evidence_warnings]
+        lines.append("")
 
     path.write_text(_clean_text("\n".join(lines)), encoding="utf-8")
-    _save_agent_state(state)
+    result_json = state.task.workspace_dir / "result.json"
+    result_json.write_text(
+        json.dumps(structured, indent=2, ensure_ascii=False), encoding="utf-8",
+    )
     state.produced_files["result"] = path
+    state.produced_files["result_json"] = result_json
     state.produced_files["state"] = state.task.workspace_dir / "state.json"
     logs_dir = state.task.workspace_dir / "logs"
     if logs_dir.is_dir():
         state.produced_files["logs"] = logs_dir
+    _save_agent_state(state)
     return path
+
+
+def _freeze_evidence(state: AgentState) -> tuple[list[dict], list[str]]:
+    """Copy only explicitly declared result files into the task workspace."""
+    declared = state.structured_result.get("evidence_files", [])
+    if not isinstance(declared, list):
+        return [], ["evidence_files must be a list"]
+
+    workspace = state.task.workspace_dir.resolve()
+    roots: list[tuple[str, Path]] = []
+    if state.repo_context is not None:
+        roots.append(("repo", state.repo_context.repo_path.resolve()))
+    roots.append(("workspace", workspace))
+    frozen: list[dict] = []
+    warnings: list[str] = []
+    seen: set[Path] = set()
+
+    for raw_path in declared:
+        source = Path(str(raw_path))
+        if not source.is_absolute():
+            base = state.repo_context.repo_path if state.repo_context else workspace
+            source = base / source
+        try:
+            source = source.resolve(strict=True)
+        except OSError:
+            warnings.append(f"Evidence file does not exist: {raw_path}")
+            continue
+        if not source.is_file():
+            warnings.append(f"Evidence path is not a file: {raw_path}")
+            continue
+        if source in seen:
+            continue
+        seen.add(source)
+
+        location = next(
+            ((label, source.relative_to(root)) for label, root in roots
+             if source == root or root in source.parents),
+            None,
+        )
+        if location is None:
+            warnings.append(f"Evidence file is outside the repository/workspace: {raw_path}")
+            continue
+        label, relative = location
+        destination = workspace / "evidence" / label / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if source != destination.resolve():
+            shutil.copy2(source, destination)
+        frozen.append({
+            "source": str(raw_path),
+            "path": str(destination.relative_to(workspace)),
+            "size_bytes": destination.stat().st_size,
+            "sha256": _sha256(destination),
+        })
+    return frozen, warnings
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _recovered_warnings(state: AgentState) -> list[str]:

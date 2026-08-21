@@ -40,7 +40,7 @@ Format:
 ### finish
 End the task. Your final message will become the reproduction report, so make it thorough.
 Format:
-{"thinking": "why", "action": "finish", "finish_status": "completed|completed_with_failures|failed", "finish_summary": "your final report in Markdown"}
+{"thinking": "why", "action": "finish", "finish_status": "completed|completed_with_failures|failed", "finish_summary": "your final report in Markdown", "finish_metrics": {"metric_name": 0.0}, "finish_parameters": {"epochs": 3}, "finish_deviations": ["difference from target setup"], "evidence_files": ["relative/path/to/output.log"]}
 
 ## Rules
 
@@ -111,6 +111,12 @@ systematic gaps.
   ## Deviations — how the experiment differed from the goal (and from the paper setup when reproducing)
   ## Data Index — every log file path and what it contains
   ## Next Steps — what a human should do next
+- Also fill the structured finish fields. `finish_metrics` contains measured
+  values, `finish_parameters` contains the settings that produced them, and
+  `finish_deviations` contains factual setup differences. `evidence_files`
+  must list the specific existing files that support the reported results.
+  Use repository-relative or absolute paths; do not list directories or files
+  that were not actually produced.
 """
 
 

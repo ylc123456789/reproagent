@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 StageName = Literal["environment", "probe", "experiment"]
 Feasibility = Literal["ready_to_run", "needs_config", "needs_patch", "blocked", "unsafe_or_too_expensive"]
@@ -155,6 +155,10 @@ class AgentAction(BaseModel):
     coding_issues: list[str] = Field(default_factory=list)
     finish_status: str = ""
     finish_summary: str = ""
+    finish_metrics: dict[str, Any] = Field(default_factory=dict)
+    finish_parameters: dict[str, Any] = Field(default_factory=dict)
+    finish_deviations: list[str] = Field(default_factory=list)
+    evidence_files: list[str] = Field(default_factory=list)
 
 
 class AgentObservation(BaseModel):
@@ -181,6 +185,7 @@ class AgentState(BaseModel):
     steps: list[AgentObservation] = Field(default_factory=list)
     status: str = "running"
     final_summary: str = ""
+    structured_result: dict[str, Any] = Field(default_factory=dict)
     result_path: Path | None = None
     file_cache: dict[str, str] = Field(default_factory=dict)
     produced_files: dict[str, Path] = Field(default_factory=dict)

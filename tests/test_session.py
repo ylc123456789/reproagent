@@ -348,6 +348,7 @@ def test_key_artifacts_register_existing_evidence(tmp_path):
     audit_out = logs / "environment_audit.stdout"
     audit_out.write_text("audit ok", encoding="utf-8")
     (tmp_path / "result.md").write_text("# result", encoding="utf-8")
+    (tmp_path / "result.json").write_text("{}", encoding="utf-8")
 
     state = AgentState(
         task=ReproTask(repo_url="r", workspace_dir=tmp_path),
@@ -369,8 +370,11 @@ def test_key_artifacts_register_existing_evidence(tmp_path):
     card = _read_yaml(tmp_path / "session.yaml")
     artifacts = card["key_artifacts"]
     by_type = {a["type"]: a for a in artifacts}
-    assert set(by_type) == {"experiment_result", "environment_audit", "experiment_log"}
-    assert by_type["experiment_result"]["path"] == "result.md"
+    assert set(by_type) == {
+        "experiment_result", "human_report", "environment_audit", "experiment_log",
+    }
+    assert by_type["experiment_result"]["path"] == "result.json"
+    assert by_type["human_report"]["path"] == "result.md"
     assert by_type["environment_audit"]["path"] == "logs/environment_audit.stdout"
     assert by_type["experiment_log"]["path"] == "logs/experiment_01_01.stdout"
     # every registered path exists on disk

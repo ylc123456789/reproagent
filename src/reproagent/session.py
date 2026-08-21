@@ -128,12 +128,18 @@ def _key_artifacts(state: AgentState, ws: Path) -> list[dict]:
     Capped to keep the card bounded.
     """
     artifacts: list[dict] = []
-    result_path = ws / "result.md"
-    if result_path.exists():
+    result_json = ws / "result.json"
+    if result_json.exists():
         artifacts.append(
-            {"type": "experiment_result", "path": "result.md",
+            {"type": "experiment_result", "path": "result.json",
              "summary": state.final_summary[:200] if state.final_summary else ""},
         )
+    result_path = ws / "result.md"
+    if result_path.exists():
+        artifacts.append({
+            "type": "human_report", "path": "result.md",
+            "summary": "human-readable reproduction report",
+        })
     audit = state.last_audit
     if audit is not None and audit.stdout_path is not None and audit.stdout_path.exists():
         artifacts.append({
