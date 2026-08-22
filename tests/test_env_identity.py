@@ -132,7 +132,7 @@ def test_collect_spec_dependency_files_and_mirror(tmp_path, monkeypatch):
 
     monkeypatch.setattr(module.platform, "system", lambda: "Linux")
     monkeypatch.setattr(module.platform, "machine", lambda: "x86_64")
-    monkeypatch.setattr(module.shutil, "which", lambda name: None)  # no GPU
+    monkeypatch.setattr(module._contract, "probe_gpu_usable", lambda: False)  # no GPU
 
     task = ReproTask(repo_url="r", workspace_dir=tmp_path / "ws",
                      python_version="3.10.9", mirror_profile="cn")
@@ -163,7 +163,7 @@ def test_accelerator_requires_gpu_false_never_probes(tmp_path, monkeypatch):
     import reproagent.runtime.env_identity as module
     from reproagent.models import ReproTask
 
-    monkeypatch.setattr(module, "_probe_nvidia_smi",
+    monkeypatch.setattr(module._contract, "probe_gpu_usable",
                         lambda: pytest.fail("must not probe without requires_gpu"))
     task = ReproTask(repo_url="r", workspace_dir=tmp_path / "ws", requires_gpu=False)
     spec = collect_environment_spec(task, tmp_path)
@@ -174,13 +174,12 @@ def test_accelerator_requires_gpu_with_gpu_yields_cuda(tmp_path, monkeypatch):
     import reproagent.runtime.env_identity as module
     from reproagent.models import ReproTask
 
-    for driver in ("12.4", "13.0"):
-        monkeypatch.setattr(module, "_probe_nvidia_smi", lambda driver=driver: driver)
-        task = ReproTask(repo_url="r", workspace_dir=tmp_path / "ws", requires_gpu=True)
-        spec = collect_environment_spec(task, tmp_path)
-        assert spec["accelerator"] == {"type": "cuda", "variant": ""}, driver
-        # the driver's maximum supported CUDA NEVER becomes a wheel variant
-        assert "cu130" not in str(spec)
+    monkeypatch.setattr(module._contract, "probe_gpu_usable", lambda: True)
+    task = ReproTask(repo_url="r", workspace_dir=tmp_path / "ws", requires_gpu=True)
+    spec = collect_environment_spec(task, tmp_path)
+    assert spec["accelerator"] == {"type": "cuda", "variant": ""}
+    # the GPU probe NEVER contributes a wheel variant (no cu130 invention)
+    assert "cu" not in spec["accelerator"]["variant"]
 
 
 def test_accelerator_variant_from_explicit_constraint(tmp_path, monkeypatch):
@@ -190,7 +189,7 @@ def test_accelerator_variant_from_explicit_constraint(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "requirements.txt").write_text("torch==2.6.0+cu124\n", encoding="utf-8")
-    monkeypatch.setattr(module, "_probe_nvidia_smi", lambda: "12.4")
+    monkeypatch.setattr(module._contract, "probe_gpu_usable", lambda: True)
     task = ReproTask(repo_url="r", workspace_dir=tmp_path / "ws", requires_gpu=True)
     spec = collect_environment_spec(task, repo)
     assert spec["accelerator"] == {"type": "cuda", "variant": "cu124"}
@@ -201,38 +200,38 @@ def test_accelerator_variant_from_explicit_constraint(tmp_path, monkeypatch):
     assert spec["accelerator"]["variant"] == ""
 
 
-def test_probe_nvidia_smi_robust_header_parse(tmp_path, monkeypatch):
+def test_probe_gpu_usable_banner_rule(tmp_path, monkeypatch):
+    """The vendored probe checks the NVIDIA-SMI banner, not a version field."""
+    import shutil
+
     import reproagent.runtime.env_identity as module
 
     fake = tmp_path / "nvidia-smi"
     fake.write_text(
         "#!/usr/bin/env bash\n"
-        "echo 'NVIDIA-SMI 550.54'\n"
-        "echo 'Driver Version: 550.54'\n"
-        "echo 'CUDA Version: 12.4'\n",
+        "echo 'NVIDIA-SMI 610.57.01  KMD Version: 610.88  CUDA UMD Version: 13.3'\n",
         encoding="utf-8",
     )
     fake.chmod(0o755)
-    monkeypatch.setattr(module.shutil, "which", lambda name: str(fake))
-    assert module._probe_nvidia_smi() == "12.4"
+    monkeypatch.setattr(shutil, "which", lambda name: str(fake))
+    assert module._contract.probe_gpu_usable() is True
 
     fake.write_text(
         "#!/usr/bin/env bash\n"
-        "echo 'NVIDIA-SMI 550.54'\n"
         "echo 'Driver Version: 550.54'\n",
         encoding="utf-8",
     )
-    assert module._probe_nvidia_smi() is None  # no cuda_version field — no crash
+    assert module._contract.probe_gpu_usable() is False  # no banner — not usable
 
-    monkeypatch.setattr(module.shutil, "which", lambda name: None)
-    assert module._probe_nvidia_smi() is None
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    assert module._contract.probe_gpu_usable() is False
 
 
 def test_requires_gpu_probe_failure_writes_warning(tmp_path, monkeypatch):
     import reproagent.runtime.env_identity as module
     from reproagent.models import ReproTask
 
-    monkeypatch.setattr(module.shutil, "which", lambda name: None)
+    monkeypatch.setattr(module._contract, "probe_gpu_usable", lambda: False)
     log = tmp_path / "setup.stderr"
     task = ReproTask(repo_url="r", workspace_dir=tmp_path / "ws", requires_gpu=True)
     spec = collect_environment_spec(task, tmp_path, probe_log=log)

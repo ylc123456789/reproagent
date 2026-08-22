@@ -11,23 +11,11 @@ LLM never participates: spec collection and fingerprints are pure code.
 """
 from __future__ import annotations
 
-import hashlib
-import json
 import platform
 import re
-import shutil
-import subprocess
 from pathlib import Path
 
 from ..models import ReproTask
-
-_DEPENDENCY_FILE_NAMES = (
-    "environment.yml", "environment.yaml", "conda.yml", "conda.yaml",
-    "requirements.txt", "pyproject.toml", "setup.py", "setup.cfg",
-)
-_REQUIREMENTS_PATTERN = re.compile(r"requirements[^/]*\.txt")
-_CU_VARIANT_RE = re.compile(r"\+cu(\d{2,3})\b")
-
 
 # ── canonical serialization and fingerprints ──────────────────────
 # The algorithms live in ONE place: the vendored contract file (byte-
@@ -80,32 +68,6 @@ def _normalize_python_version(version: str) -> str:
     return match.group(1) if match else "3.10"
 
 
-def _probe_nvidia_smi(timeout: int = 10) -> str | None:
-    """Robust driver probe: the plain nvidia-smi header's `CUDA Version:
-    X.Y` line (no --query-gpu field dependency).  Returns the CUDA version
-    or None; never raises.
-
-    FEASIBILITY-ONLY — the probed driver version NEVER enters identity.
-    """
-    exe = shutil.which("nvidia-smi")
-    if not exe:
-        return None
-    try:
-        result = subprocess.run([exe], text=True, capture_output=True, timeout=timeout)
-    except Exception:
-        return None
-    if result.returncode != 0:
-        return None
-    match = re.search(r"CUDA Version:\s*(\d+\.\d+)", result.stdout or "")
-    return match.group(1) if match else None
-
-
-def _constraint_cuda_variant(repo_path: Path) -> str:
-    """CUDA binary variant from explicit dependency constraints.
-    The rule lives in the vendored contract file."""
-    return _contract.constraint_cuda_variant(repo_path)
-
-
 def _accelerator_spec(task, repo_path: Path, *, probe_log=None) -> dict:
     """Accelerator identity per the frozen collection semantics:
 
@@ -114,7 +76,7 @@ def _accelerator_spec(task, repo_path: Path, *, probe_log=None) -> dict:
     - a failed probe with requires_gpu=True is a FEASIBILITY warning
       written to the setup log — never a silent downgrade.
     """
-    variant = _constraint_cuda_variant(repo_path)
+    variant = _contract.constraint_cuda_variant(repo_path)
     if not getattr(task, "requires_gpu", False):
         return {"type": "cpu", "variant": variant}
     if _contract.probe_gpu_usable():
@@ -132,11 +94,6 @@ def _accelerator_spec(task, repo_path: Path, *, probe_log=None) -> dict:
     return {"type": "cpu", "variant": variant}
 
 
-def _dependency_files(repo_path: Path) -> list[dict]:
-    """Dependency declarations per the vendored contract's normative set."""
-    return _contract.collect_dependency_files(repo_path)
-
-
 def collect_environment_spec(task: ReproTask, repo_path: Path, *,
                              probe_log: Path | None = None) -> dict:
     """Build the ENVIRONMENT_SPEC_V1 dict for this task + machine + repo.
@@ -150,7 +107,7 @@ def collect_environment_spec(task: ReproTask, repo_path: Path, *,
         "os": _os_family(),
         "arch": _arch(),
         "accelerator": _accelerator_spec(task, Path(repo_path), probe_log=probe_log),
-        "dependency_files": _dependency_files(Path(repo_path)),
+        "dependency_files": _contract.collect_dependency_files(Path(repo_path)),
         "channels": [],
         # The caller's mirror strategy NAME as-is; "" only when unset.
         "pip_index_profile": "" if task.mirror_profile in ("", "none") else task.mirror_profile,

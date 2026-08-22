@@ -285,7 +285,7 @@ def test_bindings_content_addressed_fields(tmp_path, monkeypatch):
 
     monkeypatch.setattr(identity_module.platform, "system", lambda: "Linux")
     monkeypatch.setattr(identity_module.platform, "machine", lambda: "x86_64")
-    monkeypatch.setattr(identity_module.shutil, "which", lambda name: None)
+    monkeypatch.setattr(identity_module._contract, "probe_gpu_usable", lambda: False)
 
     root = tmp_path / "resources"
     repo = tmp_path / "repo"
