@@ -8,13 +8,13 @@ cross-module contract for discoverability and resume.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 
 from .models import AgentState
 from .repository.context import workspace_mode
+from .runtime.env_manager import utcnow as _utcnow
 
 
 # ── write ──────────────────────────────────────────────────────────
@@ -254,9 +254,6 @@ def _resolve_pip_cache(workspace_dir: Path, state: AgentState) -> str:
         return str(Path(state.task.dataset_cache_dir).parent / "pip-cache")
     return str(workspace_dir / ".cache" / "pip")
 
-
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 def _write_yaml(path: Path, data: dict) -> None:
     """Serialize the card with a real YAML library.

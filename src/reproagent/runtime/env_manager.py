@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .env_identity import canonical_dumps, sha256_hex
-from .environment import build_backend_command
+from .environment import build_backend_command, task_run_id
 
 MANIFEST_SCHEMA = "ENVIRONMENT_MANIFEST_V1"
 
@@ -366,10 +366,6 @@ def record_usage(root: str | Path, env_id: str, *, run_id: str = "", task_id: st
     return manifest
 
 
-def _task_run_id(task) -> str:
-    parent = task.parent_run or {}
-    return str(parent.get("run_id", ""))
-
 
 def _operator_audit_checks(audit) -> list[dict]:
     """Map the reproagent environment audit onto ENVIRONMENT_AUDIT_V1 checks."""
@@ -423,14 +419,14 @@ def finalize_manifest_after_audit(state, audit) -> dict | None:
     artifact = audit_artifact_v1(
         env_id=identifier, level="experiment", outcome="pass",
         resolved_fingerprint=fingerprint,
-        audited_by={"module": "reproagent", "run_id": _task_run_id(task), "task_id": task.task_id},
+        audited_by={"module": "reproagent", "run_id": task_run_id(task), "task_id": task.task_id},
         checks=_operator_audit_checks(audit),
         notes=audit.summary,
     )
     return record_audit(
         root, identifier, artifact=artifact, resolved=inventory,
         resolved_fingerprint=fingerprint, certification="experiment",
-        usage={"run_id": _task_run_id(task), "task_id": task.task_id, "at": utcnow()},
+        usage={"run_id": task_run_id(task), "task_id": task.task_id, "at": utcnow()},
     )
 
 

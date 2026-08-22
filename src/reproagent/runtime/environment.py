@@ -234,7 +234,12 @@ def _find_conda_env(conda: str, env_ref: str) -> str | None:
 
 # ── content-addressed reuse or create (milestone-2) ───────────────
 
-def _run_id(task) -> str:
+def task_run_id(task) -> str:
+    """ResAgent run_id from the task's parent_run, '' when absent.
+
+    Shared by this module and env_manager (manifest created_by / usage /
+    audit audited_by) so the orchestrator run is recorded consistently.
+    """
     parent = task.parent_run or {}
     return str(parent.get("run_id", ""))
 
@@ -389,13 +394,13 @@ def _ensure_content_addressed(state, conda: str, stdout_path, stderr_path) -> En
     artifact = env_manager.audit_artifact_v1(
         env_id=identifier, level="experiment", outcome="pass",
         resolved_fingerprint=actual,
-        audited_by={"module": "reproagent", "run_id": _run_id(task), "task_id": task.task_id},
+        audited_by={"module": "reproagent", "run_id": task_run_id(task), "task_id": task.task_id},
         checks=checks,
     )
     env_manager.record_audit(
         root, identifier, artifact=artifact, resolved=inventory,
         resolved_fingerprint=actual, certification="experiment",
-        usage={"run_id": _run_id(task), "task_id": task.task_id, "at": env_manager.utcnow()},
+        usage={"run_id": task_run_id(task), "task_id": task.task_id, "at": env_manager.utcnow()},
     )
     stdout_path.write_text(f"reused environment: {identifier} (fingerprint verified, audit passed)\n", encoding="utf-8")
     stderr_path.write_text("", encoding="utf-8")
@@ -468,7 +473,7 @@ def _create_content_addressed(state, conda: str, root, identifier: str, prefix: 
             prefix=prefix,
             spec=spec,
             spec_fingerprint=fingerprint,
-            created_by={"module": "reproagent", "run_id": _run_id(task), "task_id": task.task_id},
+            created_by={"module": "reproagent", "run_id": task_run_id(task), "task_id": task.task_id},
             provenance={
                 # collection semantics: repo_path (absolute) and repo_commit
                 # (git HEAD) are required provenance for stale-candidate culling
@@ -498,7 +503,7 @@ def _create_content_addressed(state, conda: str, root, identifier: str, prefix: 
         inventory = env_manager.collect_resolved_inventory(conda, prefix)
         resolved = resolved_fingerprint(inventory)
         env_manager.mark_ready(root, identifier, resolved, inventory)
-        env_manager.record_usage(root, identifier, run_id=_run_id(task), task_id=task.task_id)
+        env_manager.record_usage(root, identifier, run_id=task_run_id(task), task_id=task.task_id)
         return EnvironmentInfo(
             env_name=prefix,
             created=True,
