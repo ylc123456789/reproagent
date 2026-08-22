@@ -185,3 +185,26 @@ resume：`agent.resume_task` 读 state.json 重建 ReproTask（透传全部 M2 �
 4. `type agent-loop functions as AgentState; drop legacy compatibility properties`（A2，签名+直用字段+删 property+删死循环+测试载体迁移；补 agent.run_task mock 冒烟）
 5. `dedupe run_id/utcnow helpers`（C1/C2）
 6. （若批准）`align CLI default timeout to 3600s`（E1，行为修改单独提交）
+
+## 9. 执行结果（Phase D/E 已完成，2026-08-22）
+
+实际提交（codex/readability-cleanup，自 main @ 6054b0b）：
+
+| commit | 主题 | 变更 |
+|---|---|---|
+| 9b18a5c | remove dead code（B1/B2/B3/B6） | text×2、prompts._cache_line、session.update_session_card、context legacy 重导出；5 文件 |
+| d163b30 | converge vendor delegation in env_identity（B4/C3/D1） | 删 _probe_nvidia_smi 与薄壳 + 未用常量；测试 monkeypatch 指向真实路径 `_contract.probe_gpu_usable`，任何机器可跑；3 文件 |
+| 5e5ba8a | retire legacy report writer（A1） | 删 write_result/save_state + 3 测试；-141 行 |
+| da66eae | type agent-loop functions as AgentState（A2） | environment/audit/codingagent 签名；删 3 个兼容 property；删 probe_attempts 死循环；测试载体迁移；补 agent.run_task 入口冒烟；10 文件 |
+| 7235ac8 | dedupe run_id/utcnow helpers（C1/C2） | environment.task_run_id 唯一实现；session 复用 env_manager.utcnow；3 文件 |
+| 4cf9e96 | align CLI default timeout to 3600s（E1，已批准） | main.py + resume 兜底 + 防回归测试；3 文件 |
+
+验收（Phase E）：
+
+- 全量测试：224 → **223 passed**（-3 legacy writer 测试、+2：run_task 入口冒烟、CLI 默认一致性）；`git diff --check` 通过。
+- 公共入口导入：`reproagent` / controller / runtime / integrations / _vendor 全部模块导入通过，`__all__` 契约不变。
+- CLI smoke：`reproagent --help` / `run --help` / `inspect --help` 正常。
+- 依赖：pyproject.toml 未动（pydantic + pyyaml），无新增生产依赖。
+- 规模：24 文件变更，+299/-316（其中 ~190 行为本报告）；生产代码 5628 → 5453 行（-175，-3.1%）；生产文件数 27 → 27。
+- 未处理风险：E2（python 版本身份规则 vs vendored select_python_version）按方案 §8 只报告，由总体审查决定；StageResult 随 ReproState 定义保留（公共契约）。
+- 工作区：干净；未合并默认分支，等待总体审查。
