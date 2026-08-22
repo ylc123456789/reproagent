@@ -13,10 +13,10 @@ import subprocess
 import time
 from pathlib import Path
 
-from ..models import EnvironmentInfo, ReproState
+from ..models import AgentState, EnvironmentInfo
 
 
-def ensure_environment(state: ReproState) -> EnvironmentInfo:
+def ensure_environment(state: AgentState) -> EnvironmentInfo:
     """Create or reuse the task conda environment."""
     assert state.repo_context is not None
     conda = find_conda()

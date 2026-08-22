@@ -288,7 +288,7 @@ def ensure_environment_for_controller(task: ReproTask, repo_context: RepoContext
     where environment.yml lives and setup commands must run.
     """
     env_state = AgentState(task=task, repo_context=repo_context)
-    return ensure_environment(env_state)  # type: ignore[arg-type]
+    return ensure_environment(env_state)
 
 
 def _provisioning_summary(state: AgentState) -> str:

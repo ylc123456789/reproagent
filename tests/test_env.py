@@ -130,9 +130,9 @@ def _fake_conda_env_list(envs: list[str]):
 
 
 def _env_state(tmp_path, **task_kwargs):
-    from reproagent.models import RepoContext, ReproState, ReproTask
+    from reproagent.models import AgentState, RepoContext, ReproTask
 
-    return ReproState(
+    return AgentState(
         task=ReproTask(workspace_dir=tmp_path, **task_kwargs),
         repo_context=RepoContext(repo_path=tmp_path / "repo"),
     )

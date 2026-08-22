@@ -186,10 +186,10 @@ def test_environment_summary_uses_conda_run_flag(tmp_path):
     """P3: the environment summary describes the actual flag (-p for
     prefixes, -n for names), not a hardcoded conda run -n."""
     from reproagent.integrations.codingagent import _environment_summary
-    from reproagent.models import EnvironmentInfo, RepoContext, ReproState, ReproTask
+    from reproagent.models import AgentState, EnvironmentInfo, RepoContext, ReproTask
 
     def make_state(env_name):
-        return ReproState(
+        return AgentState(
             task=ReproTask(workspace_dir=tmp_path / "w"),
             repo_context=RepoContext(repo_path=tmp_path / "r"),
             environment=EnvironmentInfo(env_name=env_name),
@@ -205,11 +205,11 @@ def test_patch_orchestration_passes_frozen_env_policy(tmp_path):
     """run_coding_agent_for_patch delegates with env_policy=frozen + the
     operator's env name (contract O5)."""
     from reproagent.integrations.codingagent import run_coding_agent_for_patch
-    from reproagent.models import CommandPlan, EnvironmentInfo, RepoContext, ReproState, ReproTask
+    from reproagent.models import AgentState, CommandPlan, EnvironmentInfo, RepoContext, ReproTask
 
     capture = tmp_path / "spec.txt"
     checkout = _spec_capture_checkout(tmp_path / "CodingAgent", capture, with_env_fields=True)
-    state = ReproState(
+    state = AgentState(
         task=ReproTask(
             workspace_dir=tmp_path / "ws", codingagent_path=checkout,
             experiment_goal="g",

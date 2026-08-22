@@ -1,9 +1,9 @@
 from reproagent.runtime.audit import audit_environment
-from reproagent.models import EnvironmentInfo, RepoContext, ReproState, ReproTask
+from reproagent.models import AgentState, EnvironmentInfo, RepoContext, ReproTask
 
 def test_audit_detects_python_outside_expected_env(tmp_path, monkeypatch):
     task = ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path)
-    state = ReproState(
+    state = AgentState(
         task=task,
         repo_context=RepoContext(
             repo_path=tmp_path,
@@ -33,7 +33,7 @@ def test_audit_detects_python_outside_expected_env(tmp_path, monkeypatch):
 def test_audit_passes_when_python_and_torch_are_inside_env(tmp_path, monkeypatch):
     env_prefix = "/home/cyl/miniconda3/envs/repro_demo"
     task = ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path)
-    state = ReproState(
+    state = AgentState(
         task=task,
         repo_context=RepoContext(repo_path=tmp_path),
         environment=EnvironmentInfo(env_name="repro_demo"),
@@ -57,7 +57,7 @@ def test_audit_passes_when_python_and_torch_are_inside_env(tmp_path, monkeypatch
 def test_audit_requires_repair_for_numpy_abi_warning(tmp_path, monkeypatch):
     env_prefix = "/home/cyl/miniconda3/envs/repro_demo"
     task = ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path)
-    state = ReproState(
+    state = AgentState(
         task=task,
         repo_context=RepoContext(repo_path=tmp_path),
         environment=EnvironmentInfo(env_name="repro_demo"),
@@ -82,7 +82,7 @@ def test_audit_requires_repair_for_numpy_abi_warning(tmp_path, monkeypatch):
 def test_audit_passes_with_custom_conda_env_dir(tmp_path, monkeypatch):
     env_prefix = "/root/autodl-tmp/conda-envs/repro_demo"
     task = ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path)
-    state = ReproState(
+    state = AgentState(
         task=task,
         repo_context=RepoContext(repo_path=tmp_path),
         environment=EnvironmentInfo(env_name="repro_demo"),
@@ -107,7 +107,7 @@ def test_audit_matches_explicit_prefix_environment(tmp_path, monkeypatch):
     """env_name as an absolute prefix must match by resolved path, not name."""
     env_prefix = "/opt/conda/envs/repro_demo"
     task = ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path)
-    state = ReproState(
+    state = AgentState(
         task=task,
         repo_context=RepoContext(repo_path=tmp_path),
         environment=EnvironmentInfo(env_name=env_prefix),
@@ -130,7 +130,7 @@ def test_audit_matches_explicit_prefix_environment(tmp_path, monkeypatch):
 def test_audit_uses_sanitized_command_environment(tmp_path, monkeypatch):
     env_prefix = "/home/cyl/miniconda3/envs/repro_demo"
     task = ReproTask(paper_url="paper", repo_url="repo", workspace_dir=tmp_path)
-    state = ReproState(
+    state = AgentState(
         task=task,
         repo_context=RepoContext(repo_path=tmp_path),
         environment=EnvironmentInfo(env_name="repro_demo"),

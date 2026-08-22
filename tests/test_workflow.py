@@ -64,6 +64,23 @@ def test_controller_mock_steps_recorded(tmp_path):
     assert len(state.steps) >= 1
 
 
+def test_agent_run_task_public_entry_completes(tmp_path):
+    """The agent.run_task public API (used by the CLI and ResAgent) drives
+    the same loop: mock LLM, real workspace, result written."""
+    from reproagent.agent import run_task
+
+    task = ReproTask(
+        paper_url="paper", repo_url="repo", workspace_dir=tmp_path / "run",
+        experiment_goal="Run test.", mock_llm=True, max_steps=5,
+    )
+    state = run_task(task)
+
+    assert state.status == "completed"
+    assert state.result_path is not None and state.result_path.exists()
+    assert (tmp_path / "run" / "result.json").exists()
+    assert (tmp_path / "run" / "state.json").exists()
+
+
 # ── setup_only (environment provisioning) ─────────────────────────
 
 def test_setup_only_blocks_experiment_commands(tmp_path):

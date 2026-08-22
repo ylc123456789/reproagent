@@ -194,22 +194,6 @@ class AgentState(BaseModel):
     # (see dataset_cache.py). Rendered into every turn prompt.
     dataset_links: list[dict] = Field(default_factory=list)
 
-    # compatibility aliases for infrastructure modules
-    @property
-    def environment_audit(self):
-        """Compatibility alias for infrastructure modules."""
-        return self.last_audit
-
-    @property
-    def coding_agent_results(self):
-        """Compatibility alias for infrastructure modules."""
-        return self.coding_results
-
-    @property
-    def probe_attempts(self) -> list:
-        """Compatibility alias: always empty for agent-loop state."""
-        return []
-
 
 # ── Legacy types (used by runner / coding / report) ───────────────
 

@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 from .environment import build_backend_command, find_conda
-from ..models import EnvironmentAudit, ReproState
+from ..models import AgentState, EnvironmentAudit
 from .runner import _command_env
 
 
@@ -55,7 +55,7 @@ print(json.dumps(data, indent=2, ensure_ascii=False))
 """
 
 
-def audit_environment(state: ReproState) -> EnvironmentAudit:
+def audit_environment(state: AgentState) -> EnvironmentAudit:
     """Inspect the prepared conda env and summarize important mismatches."""
     assert state.environment is not None
     logs = state.task.workspace_dir / "logs"
@@ -153,7 +153,7 @@ def audit_environment(state: ReproState) -> EnvironmentAudit:
     )
 
 
-def _gpu_visible(state: ReproState) -> bool:
+def _gpu_visible(state: AgentState) -> bool:
     """Return whether CUDA appears visible in audit output."""
     if not state.repo_context:
         return False

@@ -18,7 +18,7 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 from types import ModuleType
 
-from ..models import CodingAgentResult, CommandPlan, ReproState
+from ..models import AgentState, CodingAgentResult, CommandPlan
 from ..runtime.environment import conda_run_flag, find_conda
 
 ENV_VAR = "CODINGAGENT_PATH"
@@ -198,11 +198,11 @@ def _isolated_sys_path_import(import_root: Path) -> Iterator[None]:
 
 # ── patch orchestration ──────────────────────────────────────────
 
-def run_coding_agent_for_patch(state: ReproState, plan: CommandPlan) -> CodingAgentResult:
+def run_coding_agent_for_patch(state: AgentState, plan: CommandPlan) -> CodingAgentResult:
     """Run the external CodingAgent to produce and verify a repository patch."""
     if state.repo_context is None:
         raise RuntimeError("repo context is required before running CodingAgent")
-    output_dir = state.task.workspace_dir / "patches" / f"coding_agent_{len(state.coding_agent_results) + 1:02d}"
+    output_dir = state.task.workspace_dir / "patches" / f"coding_agent_{len(state.coding_results) + 1:02d}"
     env_summary = _environment_summary(state)
     verify_commands = _verification_commands(state, plan)
     report = run_code_task(
@@ -235,7 +235,7 @@ def run_coding_agent_for_patch(state: ReproState, plan: CommandPlan) -> CodingAg
     )
 
 
-def _task_goal(state: ReproState, plan: CommandPlan, env_summary: str) -> str:
+def _task_goal(state: AgentState, plan: CommandPlan, env_summary: str) -> str:
     """Build the CodingAgent patch goal text."""
     issues = "\n".join(f"- {item}" for item in plan.needs_user_input)
     commands = "\n".join(f"- {command}" for command in plan.commands)
@@ -277,13 +277,13 @@ def _constraints(env_summary: str) -> list[str]:
     ]
 
 
-def _environment_summary(state: ReproState) -> str:
+def _environment_summary(state: AgentState) -> str:
     """Summarize the prepared runtime environment."""
     if state.environment is None:
         return "No reproagent-managed environment is available; use only repo-local inspection and report environment blockers."
     audit_details = ""
-    if state.environment_audit and state.environment_audit.details:
-        audit_details = chr(10) + "- Audit details: " + " / ".join(state.environment_audit.details)
+    if state.last_audit and state.last_audit.details:
+        audit_details = chr(10) + "- Audit details: " + " / ".join(state.last_audit.details)
     codingagent_path = str(state.task.codingagent_path) if state.task.codingagent_path else "importable default"
     return (
         f"- reproagent has already prepared the conda environment {state.environment.env_name!r} for this repository.\n"
@@ -296,14 +296,14 @@ def _environment_summary(state: ReproState) -> str:
     )
 
 
-def _verification_commands(state: ReproState, plan: CommandPlan) -> list[str]:
-    """Choose verification commands for the patch attempt."""
+def _verification_commands(state: AgentState, plan: CommandPlan) -> list[str]:
+    """Choose verification commands for the patch attempt.
+
+    The agent loop no longer records probe stage attempts (the legacy
+    ReproState.probe_attempts field is always empty for agent-loop state),
+    so verification commands come from the plan's --help/--debug entries.
+    """
     commands: list[str] = []
-    for attempt in state.probe_attempts:
-        for result in attempt.results:
-            command = result.command
-            if "--help" in command and command not in commands:
-                commands.append(command)
     for command in plan.commands:
         lowered = command.lower()
         if ("--debug" in lowered or "--help" in lowered) and command not in commands:

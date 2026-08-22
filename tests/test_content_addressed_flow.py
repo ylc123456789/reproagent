@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from reproagent.models import EnvironmentInfo, RepoContext, ReproState, ReproTask
+from reproagent.models import AgentState, EnvironmentInfo, RepoContext, ReproTask
 from reproagent.runtime import env_manager
 from reproagent.runtime import environment as env_module
 
@@ -50,7 +50,7 @@ def _fake_conda_script(tmp_path: Path, inventory_file: Path, create_log: Path,
     return str(fake)
 
 
-def _make_state(tmp_path: Path, root: Path, repo_url: str) -> ReproState:
+def _make_state(tmp_path: Path, root: Path, repo_url: str) -> AgentState:
     task = ReproTask(
         workspace_dir=tmp_path / "ws",
         reuse_mode="content_addressed",
@@ -61,7 +61,7 @@ def _make_state(tmp_path: Path, root: Path, repo_url: str) -> ReproState:
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
     (repo / "requirements.txt").write_text("torch==2.6.0\n", encoding="utf-8")
-    return ReproState(task=task, repo_context=RepoContext(repo_path=repo))
+    return AgentState(task=task, repo_context=RepoContext(repo_path=repo))
 
 
 def _install_fake(tmp_path, monkeypatch, create_sleep: float = 0.0):
@@ -118,7 +118,7 @@ def test_drift_refuses_reuse_and_marks_manifest(tmp_path, monkeypatch):
 
 def test_content_addressed_requires_resource_root(tmp_path):
     task = ReproTask(workspace_dir=tmp_path / "ws", reuse_mode="content_addressed")
-    state = ReproState(task=task, repo_context=RepoContext(repo_path=tmp_path / "repo"))
+    state = AgentState(task=task, repo_context=RepoContext(repo_path=tmp_path / "repo"))
     with pytest.raises(RuntimeError, match="requires resource_root"):
         env_module.ensure_environment(state)
 
@@ -253,7 +253,7 @@ def test_legacy_explicit_env_name_binding_unchanged(tmp_path, monkeypatch):
         env_name="target_env",
         resource_root=str(tmp_path / "resources"),
     )
-    state = ReproState(task=task, repo_context=RepoContext(repo_path=tmp_path / "repo"))
+    state = AgentState(task=task, repo_context=RepoContext(repo_path=tmp_path / "repo"))
     info = env_module.ensure_environment(state)
 
     assert info.env_name == "target_env"
@@ -332,7 +332,7 @@ def test_uninstall_then_reuse_triggers_drift(tmp_path, monkeypatch):
         resource_root=str(root), python_version="3.10",
         repo_url="https://github.com/org/demo.git",
     )
-    reuse_state = ReproState(task=reuse_task, repo_context=RepoContext(repo_path=tmp_path / "repo"))
+    reuse_state = AgentState(task=reuse_task, repo_context=RepoContext(repo_path=tmp_path / "repo"))
     with pytest.raises(RuntimeError, match="drift detected"):
         env_module.ensure_environment(reuse_state)
 
@@ -416,7 +416,7 @@ def test_default_legacy_mode_unchanged(tmp_path, monkeypatch):
         workspace_dir=tmp_path / "ws",
         resource_root=str(tmp_path / "resources"),  # ignored in legacy mode
     )
-    state = ReproState(task=task, repo_context=RepoContext(repo_path=tmp_path / "repo"))
+    state = AgentState(task=task, repo_context=RepoContext(repo_path=tmp_path / "repo"))
     info = env_module.ensure_environment(state)
 
     assert info.created is True
