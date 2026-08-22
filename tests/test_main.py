@@ -13,6 +13,18 @@ def test_run_parser_requires_and_reads_experiment_goal(tmp_path):
     assert args.experiment_goal == "Run MNIST and report accuracy."
 
 
+def test_run_parser_default_timeout_matches_model_default(tmp_path):
+    """CLI and ReproTask.timeout_seconds must share ONE default (3600s)."""
+    from reproagent.models import ReproTask
+
+    parser = build_parser()
+    args = parser.parse_args([
+        "run", "--repo", "repo", "--workspace", str(tmp_path),
+        "--experiment-goal", "Run MNIST.",
+    ])
+    assert args.timeout == ReproTask.model_fields["timeout_seconds"].default == 3600
+
+
 def test_run_parser_reads_confirm_before_experiment(tmp_path):
     parser = build_parser()
     args = parser.parse_args([

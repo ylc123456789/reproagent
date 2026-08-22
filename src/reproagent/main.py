@@ -36,7 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--api-key-env", default="OPENAI_API_KEY", help="Env var with the API key")
     run.add_argument("--backend", default="conda", choices=["conda"], help="Execution backend")
     run.add_argument("--python-version", default="3.10", help="Python version for conda env")
-    run.add_argument("--timeout", type=int, default=1800, help="Timeout per command batch (seconds)")
+    run.add_argument("--timeout", type=int, default=3600, help="Timeout per command batch (seconds)")
     run.add_argument("--max-steps", type=int, default=30, help="Max agent steps before force-finish")
     run.add_argument("--experiment-goal", required=True, help="Concrete reproduction goal")
     run.add_argument("--confirm-before-experiment", action="store_true",

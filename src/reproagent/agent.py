@@ -49,7 +49,7 @@ def resume_task(
         workspace_dir=ws,
         repo_cache_dir=Path(orig_task["repo_cache_dir"]) if orig_task.get("repo_cache_dir") else None,
         task_id=orig_task.get("task_id", ""),  # same task_id → env reused
-        timeout_seconds=timeout or orig_task.get("timeout_seconds", 1800),
+        timeout_seconds=timeout or orig_task.get("timeout_seconds", 3600),
         max_steps=max_steps or orig_task.get("max_steps", 30),
         mock_llm=mock_llm or orig_task.get("mock_llm", False),
         model=model or orig_task.get("model"),
