@@ -122,7 +122,7 @@ resume：`agent.resume_task` 读 state.json 重建 ReproTask（透传全部 M2 �
 | B3 | session.py:118-120 update_session_card | 零引用（write_session_card 的一次别名包装） |
 | B4 | env_identity.py:83-100 _probe_nvidia_smi | 生产零调用——_accelerator_spec（env_identity.py:120）实际走 _contract.probe_gpu_usable；仅 tests/test_env_identity.py:166-228 引用 |
 | B5 | codingagent.py:302-306 probe_attempts 循环 | AgentState.probe_attempts property 恒空列表，循环体不可达（并入 A2 删除） |
-| B6 | context/__init__.py:10-12 legacy 重导出（clone_repo/collect_context/setup_workspace） | src/ 内零引用（loop.py 走 `..repository.context` 新路径）；tests 零引用（原独占覆盖的 test_compat_shims.py 已随重构删除）；ResAgent 的 `resagent.context` 命中均与其无关。删除后 `reproagent.context.policy` 不受影响 |
+| B6 | context/__init__.py:10-12 legacy 重导出（clone_repo/collect_context/setup_workspace） | 原判定"零消费者"并删除。**已修正（RP2）**：外部消费者（flat context.py 时代的公共导入面）仍依赖该路径，按接口稳定性要求恢复——从 repository.context 重导出、不复制实现，identity 测试锁定；这不是恢复旧线性 workflow（该 workflow 的生产代码已不存在） |
 
 ### C. 重复实现（Redundancy）
 
@@ -149,11 +149,9 @@ resume：`agent.resume_task` 读 state.json 重建 ReproTask（透传全部 M2 �
 - 是否改变行为：CLI 对齐到 3600 会改变 CLI 行为（属方案 Phase C 表中 CLI 类）。
 - 建议：本轮不改或经批准后一行对齐。
 
-**E2. python 版本身份规则与 vendored 契约的 `select_python_version` 不一致**
-- 位置：env_identity.py:78-80（`_normalize_python_version`：task.python_version 取 major.minor，缺省 3.10）vs _vendor/env_contract_v1.py:199-217（契约：task 显式值 > environment.yml pin > 默认）。
-- 现状：本地收集忽略 environment.yml 的 python pin；golden fixtures 测试通过（fixtures 不含该分歧场景）。
-- 是否改变行为：对齐会改变 spec 指纹（identity 变化）——属跨模块契约，**不自行修改**，按方案 §8 由总体审查决定是否需要交办文档。
-- 本轮处理：仅报告。
+**E2. python 版本身份规则与 vendored 契约的 `select_python_version` 不一致**（**已修复：RP1**）
+- 根因：本地 `_normalize_python_version` 只取 `task.python_version` 的 major.minor（缺省 3.10），完全不看仓库的 environment.yml pin。结果是：同一仓库换 Python 声明版本，spec identity 不变——环境身份与实际仓库 Python 要求脱节；且同一条"Python 版本选择"规则在 vendor 契约（task > environment.yml pin > default）与本地实现（仅 task/default）之间漂移。
+- 修复：`collect_environment_spec` 改调 `_contract.select_python_version(task.python_version, repo_path)`（唯一规则，vendor 字节一致文件），删除本地 `_normalize_python_version` 及其 re import。测试覆盖：显式优先 / environment.yml pin 被读取 / 两者皆无走契约默认 / 指纹随 Python 版本变化。契约文件未改动（跨仓字节一致不变）。
 
 ### F. 观察项（不做修改）
 
@@ -208,3 +206,25 @@ resume：`agent.resume_task` 读 state.json 重建 ReproTask（透传全部 M2 �
 - 规模：24 文件变更，+299/-316（其中 ~190 行为本报告）；生产代码 5628 → 5453 行（-175，-3.1%）；生产文件数 27 → 27。
 - 未处理风险：E2（python 版本身份规则 vs vendored select_python_version）按方案 §8 只报告，由总体审查决定；StageResult 随 ReproState 定义保留（公共契约）。
 - 工作区：干净；未合并默认分支，等待总体审查。
+
+## 10. 后续任务单执行（RP1–RP3，2026-08-22）
+
+| commit | 主题 |
+|---|---|
+| 1b9d1f4 | RP1：spec 收集改用 `_contract.select_python_version`（task > environment.yml pin > 契约默认）；删 `_normalize_python_version`；4 个新测试 |
+| 363487e | RP2：恢复 `reproagent.context` 公共重导出（指向 repository.context 实现，identity 测试锁定）；新增 tests/test_public_imports.py |
+| 本提交 | RP3：报告补充根因与保留理由 |
+
+### 旧 workflow 与公共兼容入口的区别
+
+- **旧线性 workflow**（plan → validate → stage 执行）：生产代码已完全删除，本任务单不恢复任何部分。
+- **公共兼容入口**（`reproagent.context` 重导出、`reproagent.__all__` 中的 ReproState/CommandPlan）：只是接口稳定性承诺——外部 import 不因内部重组而断裂。它们指向当前唯一主线实现（repository.context、agent-loop 状态机），不携带任何旧行为。
+- 判定标准：兼容入口必须是"重导出当前实现"（RP2 的 identity 测试锁死这一点）；任何要求复制旧渲染/旧状态机逻辑的都是 workflow 恢复，拒绝。
+
+### 最终测试结果（2026-08-22）
+
+- **229 passed**（RP1 +4、RP2 +2；相对整理基线 224：-3 legacy writer、+8 新增）
+- `git diff --check` 通过；`from reproagent.context import clone_repo, collect_context, setup_workspace` 验证通过
+- environment.yml python pin 进入 ENVIRONMENT_SPEC_V1 与 spec_fingerprint（test_python_version_reads_environment_yml_pin / test_python_version_joins_identity）
+- Prompt、外部契约（agent.yaml / __all__ / 模型字段顺序）、依赖（pyproject.toml）均未改动
+- 分支 codex/readability-cleanup 已推送，未合并 main
