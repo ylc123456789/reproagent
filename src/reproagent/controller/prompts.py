@@ -288,13 +288,6 @@ def _env_line(env: EnvironmentInfo) -> str:
     return f"Conda env: {env.env_name} (reused — may have packages)"
 
 
-def _cache_line(task: ReproTask) -> str:
-    """Deprecated: superseded by dataset_cache.render_dataset_block."""
-    if task.dataset_cache_dir:
-        return f"\nDataset cache: {task.dataset_cache_dir}\n"
-    return ""
-
-
 def _mirror_block(task: ReproTask) -> str:
     """Render the mirror policy block with profile-specific guidance."""
     profile = task.mirror_profile

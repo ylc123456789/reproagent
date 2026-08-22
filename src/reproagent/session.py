@@ -115,11 +115,6 @@ def write_session_card(state: AgentState, *, created_at: str | None = None, **ex
     return path
 
 
-def update_session_card(state: AgentState, **extra_bindings) -> Path:
-    """Update the session card status and updated_at (e.g. during resume)."""
-    return write_session_card(state, **extra_bindings)
-
-
 def _key_artifacts(state: AgentState, ws: Path) -> list[dict]:
     """Register machine-readable evidence: only paths that actually exist.
 

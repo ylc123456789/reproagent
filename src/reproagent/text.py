@@ -87,18 +87,6 @@ def normalize_text(text: str | None) -> str:
     return cleaned
 
 
-def normalize_plan_text(text: str | None) -> str | None:
-    """Normalize a single plan text value; returns None for None input."""
-    if text is None:
-        return None
-    return normalize_text(text)
-
-
-def normalize_text_list(items: list[str]) -> list[str]:
-    """Normalize every string in a list through normalize_text."""
-    return [normalize_text(item) for item in items]
-
-
 def _best_mojibake_repair(text: str) -> str:
     """Choose the best common mojibake repair."""
     candidates = [text]
