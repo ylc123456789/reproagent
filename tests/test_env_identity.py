@@ -155,6 +155,62 @@ def test_canonical_dumps_matches_reference_shape():
     assert canonical_dumps({"b": 1, "a": {"c": 2}}) == '{"a":{"c":2},"b":1}'
 
 
+# ── python version selection (RP1: one rule, from the contract) ───
+
+def test_python_version_explicit_task_wins(tmp_path, monkeypatch):
+    import reproagent.runtime.env_identity as module
+    from reproagent.models import ReproTask
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "environment.yml").write_text("dependencies:\n  - python=3.9\n", encoding="utf-8")
+    monkeypatch.setattr(module._contract, "probe_gpu_usable", lambda: False)
+    task = ReproTask(repo_url="r", workspace_dir=tmp_path / "ws", python_version="3.11.5")
+    spec = collect_environment_spec(task, repo)
+    assert spec["python"] == "3.11"
+
+
+def test_python_version_reads_environment_yml_pin(tmp_path, monkeypatch):
+    import reproagent.runtime.env_identity as module
+    from reproagent.models import ReproTask
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "environment.yml").write_text(
+        "name: demo\ndependencies:\n  - python=3.9\n", encoding="utf-8")
+    monkeypatch.setattr(module._contract, "probe_gpu_usable", lambda: False)
+    task = ReproTask(repo_url="r", workspace_dir=tmp_path / "ws", python_version="")
+    spec = collect_environment_spec(task, repo)
+    assert spec["python"] == "3.9"
+
+
+def test_python_version_defaults_without_any_source(tmp_path, monkeypatch):
+    import reproagent.runtime.env_identity as module
+    from reproagent.models import ReproTask
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(module._contract, "probe_gpu_usable", lambda: False)
+    task = ReproTask(repo_url="r", workspace_dir=tmp_path / "ws", python_version="")
+    spec = collect_environment_spec(task, repo)
+    assert spec["python"] == "3.10"  # contract DEFAULT_PYTHON
+
+
+def test_python_version_joins_identity(tmp_path, monkeypatch):
+    import reproagent.runtime.env_identity as module
+    from reproagent.models import ReproTask
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "requirements.txt").write_text("torch==2.6.0\n", encoding="utf-8")
+    monkeypatch.setattr(module._contract, "probe_gpu_usable", lambda: False)
+    task_a = ReproTask(repo_url="r", workspace_dir=tmp_path / "ws", python_version="3.10")
+    task_b = ReproTask(repo_url="r", workspace_dir=tmp_path / "ws", python_version="3.12")
+    fp_a = spec_fingerprint(collect_environment_spec(task_a, repo))
+    fp_b = spec_fingerprint(collect_environment_spec(task_b, repo))
+    assert fp_a != fp_b
+
+
 # ── accelerator collection semantics ──────────────────────────────
 
 def test_accelerator_requires_gpu_false_never_probes(tmp_path, monkeypatch):

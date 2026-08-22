@@ -12,7 +12,6 @@ LLM never participates: spec collection and fingerprints are pure code.
 from __future__ import annotations
 
 import platform
-import re
 from pathlib import Path
 
 from ..models import ReproTask
@@ -63,11 +62,6 @@ def _arch() -> str:
     return machine
 
 
-def _normalize_python_version(version: str) -> str:
-    match = re.match(r"(\d+\.\d+)", version or "")
-    return match.group(1) if match else "3.10"
-
-
 def _accelerator_spec(task, repo_path: Path, *, probe_log=None) -> dict:
     """Accelerator identity per the frozen collection semantics:
 
@@ -103,7 +97,9 @@ def collect_environment_spec(task: ReproTask, repo_path: Path, *,
     """
     return {
         "schema": "ENVIRONMENT_SPEC_V1",
-        "python": _normalize_python_version(task.python_version),
+        # ONE python-version rule, from the vendored contract: explicit
+        # task value > repository environment.yml pin > contract default.
+        "python": _contract.select_python_version(task.python_version, Path(repo_path)),
         "os": _os_family(),
         "arch": _arch(),
         "accelerator": _accelerator_spec(task, Path(repo_path), probe_log=probe_log),
